@@ -27,8 +27,9 @@
       "icon": "assets/dtulogo.ico"
     },
     "mac": {
-      "target": ["dmg", "zip"],
-      "icon": "assets/dtulogo.icns"
+      "target": [{ "target": "dmg", "arch": ["arm64"] }, { "target": "zip", "arch": ["arm64"] }],
+      "icon": "assets/dtulogo.icns",
+      "identity": null
     },
     "linux": {
       "target": ["AppImage", "deb"],

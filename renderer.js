@@ -254,7 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
-      const parsedCourses = eval('(' + jsonText + ')');
+      const parsedCourses = JSON.parse(jsonText);
       if (!Array.isArray(parsedCourses)) {
         throw new Error('Input must be a JSON array.');
       }
