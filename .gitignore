@@ -1,2 +1,16 @@
 node_modules/
 dist/
+
+# Test files
+test.js
+test_e2e.js
+
+# Leftover diagrams / scratch files
+*.png
+!assets/dtulogo.png
+
+# Windows icon (not needed on Mac)
+assets/dtulogo.ico
+
+# macOS junk
+.DS_Store

@@ -1,11 +1,17 @@
 {
-  "name": "coureregdtu",
+  "name": "dtu-course-registrar",
   "version": "1.0.0",
-  "description": "Course Registrar DTU",
+  "description": "Automated course seat monitor and registrar for DTU students — snipes elective seats the moment they open.",
   "main": "main.js",
   "author": {
-    "name": "potui",
-    "email": "potui@potui.xyz"
+    "name": "Vandit Bajaj",
+    "email": "vanditbajaj15@gmail.com",
+    "url": "https://github.com/vandit-bajaj"
+  },
+  "homepage": "https://github.com/vandit-bajaj/DTU-course-reg-for-mac",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vandit-bajaj/DTU-course-reg-for-mac.git"
   },
   "license": "MIT",
   "scripts": {
@@ -16,8 +22,8 @@
     "dist:linux": "electron-builder --linux"
   },
   "build": {
-    "appId": "com.saksham.coureregdtu",
-    "productName": "CourseRegistrar",
+    "appId": "com.vanditbajaj.dtu-course-registrar",
+    "productName": "DTU Course Registrar",
     "directories": {
       "output": "dist"
     },

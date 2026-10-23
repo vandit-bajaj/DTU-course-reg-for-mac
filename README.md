@@ -1,54 +1,46 @@
 # DTU Course Registrar (macOS)
 
-An Electron app that monitors the DTU course registration portal and **automatically registers elective courses** the moment a seat opens.
+> **Automated elective seat sniper for Delhi Technological University students.**  
+> Monitors the DTU course registration portal and registers your courses **the instant a seat opens** — faster than any human can click.
 
----
+<br>
+
+## How It Works
+
+1. Logs into `reg.exam.dtu.ac.in` using your roll number and password
+2. Scrapes the elective courses table to track your target courses
+3. Polls the registration page every **~900ms**, using ETag caching to avoid unnecessary parsing
+4. The moment a seat opens → fires a registration POST in **under 100ms**
+5. Sends a **macOS desktop notification** when a course is registered
+6. Auto re-logs if your session expires (optional)
+
+<br>
 
 ## Requirements
-- macOS (Apple Silicon / Intel)
-- Node.js ≥ 18 ([Homebrew](https://brew.sh/): `brew install node`)
 
----
+- macOS (Apple Silicon or Intel)
+- [Node.js](https://nodejs.org/) ≥ 18  
+  Install via Homebrew: `brew install node`
 
-## Run in Dev Mode
+<br>
+
+## Setup
 
 ```bash
+git clone https://github.com/vandit-bajaj/DTU-course-reg-for-mac.git
+cd DTU-course-reg-for-mac
 npm install
 npm start
 ```
 
----
+<br>
 
-## Build a distributable `.dmg`
+## Usage
 
-```bash
-npm run dist:mac
-```
-
-Output will be in the `dist/` folder — a `.dmg` and a `.zip` for arm64 Mac.
-
-### ⚠️ Gatekeeper Warning (Unsigned App)
-
-Since this app is not signed with an Apple Developer certificate, macOS will block it on first open.
-
-**To bypass:**
-1. Try to open the app → you'll see *"Apple could not verify..."*
-2. Open **System Settings → Privacy & Security**
-3. Scroll down to find the security warning for `CourseRegistrar`
-4. Click **"Open Anyway"**
-
-Or run this command on the built `.app` to strip the quarantine flag:
-```bash
-xattr -cr dist/mac-arm64/CourseRegistrar.app
-```
-
----
-
-## How to Use
-
-1. Enter your **Roll Number** and **Password**
-2. Add courses you want to register — enter the **Course Code** (e.g. `HU317`) and **Slot** (e.g. `E2`)
-   - Or click the `</>` button to paste a JSON list:
+1. **Enter your credentials** — Roll Number and Password
+2. **Add courses** you want to register:
+   - Click **Add Course** and type the course code + slot
+   - Or click the **`</>`** button to paste a JSON list:
      ```json
      [
        { "code": "HU317", "slot": "E2" },
@@ -56,21 +48,78 @@ xattr -cr dist/mac-arm64/CourseRegistrar.app
      ]
      ```
 3. Optionally check **Auto Login on Session Expiry**
-4. Click **Start Automation**
+4. Click **Start Automation** — the bot takes over from here
 
-The bot will poll the portal every ~900ms. When a seat opens, it instantly registers you and sends a **macOS desktop notification**.
+Status updates appear live in the app. Registered courses are listed with timestamps.
 
----
+<br>
 
-## How It Works
+## Build a Distributable `.dmg`
 
-1. Logs in to `reg.exam.dtu.ac.in` via form POST (direct IP to skip DNS)
-2. Scrapes the elective course table with Cheerio to find your target courses
-3. Polls the registration page, using **ETag caching** to skip parsing when content is unchanged
-4. Fires a registration POST the instant seats > 0
-5. Detects session expiry and auto re-logs if enabled
+```bash
+npm run dist:mac
+```
 
----
+Output will be in `dist/` — a `.dmg` and `.zip` for arm64 Mac.
+
+### ⚠️ Opening the Unsigned App (Gatekeeper)
+
+macOS blocks unsigned apps by default. After installing the `.dmg`:
+
+**Option A** — Strip the quarantine flag (recommended):
+```bash
+xattr -cr /Applications/DTU\ Course\ Registrar.app
+```
+
+**Option B** — Open via System Settings:
+1. Try to open the app → *"Apple could not verify..."*
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down → click **Open Anyway**
+
+<br>
+
+## Project Structure
+
+```
+DTU-course-reg-for-mac/
+├── main.js          # Electron main process — window + IPC handlers
+├── preload.js       # Secure bridge between renderer and main (contextBridge)
+├── renderer.js      # UI logic — form handling, status updates, events
+├── automation.js    # Core engine — login, scraping, polling, registration
+├── index.html       # App UI structure
+├── styles.css       # App styling
+├── assets/
+│   ├── dtulogo.png  # App icon (PNG)
+│   └── dtulogo.icns # App icon (macOS bundle format)
+└── package.json
+```
+
+<br>
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Desktop shell | [Electron 34](https://www.electronjs.org/) |
+| HTTP requests | [got v14](https://github.com/sindresorhus/got) |
+| HTML parsing | [Cheerio](https://cheerio.js.org/) |
+| Desktop notifications | [node-notifier](https://github.com/mikaelbr/node-notifier) |
+| JSON editor | [CodeMirror 5](https://codemirror.net/) |
+
+<br>
+
+## Notes
+
+- The app connects **directly to the server IP** (`14.139.251.105`) to bypass DNS lookup delay
+- SSL certificate verification is disabled for direct IP connections (expected for this server)
+- Credentials are only held in memory during the session — never written to disk
+
+<br>
+
+## Author
+
+**Vandit Bajaj** — [github.com/vandit-bajaj](https://github.com/vandit-bajaj)
 
 ## License
+
 MIT
