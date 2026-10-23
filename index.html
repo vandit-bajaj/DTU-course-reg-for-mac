@@ -1,0 +1,113 @@
+<!-- index.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Course Registrar</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/dracula.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Course Registrar</h1>
+
+    <div id="error-area" class="hidden"></div>
+
+    <div class="card">
+      <h2>Credentials</h2>
+      <div class="input-group">
+        <label for="roll-no">Roll Number</label>
+        <input type="text" id="roll-no" placeholder="Enter your roll number" required>
+      </div>
+      <div class="input-group password-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter your password" required>
+        <span id="toggle-password" class="icon-btn">
+          <svg id="eye-open" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+          </svg>
+          <svg id="eye-closed" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hidden">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+          </svg>
+        </span>
+      </div>
+      <div class="input-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-login">
+          Auto Login on Session Expiry
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="courses-header">
+        <h2>Courses to Track</h2>
+        <button id="json-input-btn" class="icon-btn" title="Input from JSON">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
+          </svg>
+        </button>
+      </div>
+      <div id="course-list">
+        <!-- Dynamic Course Rows Will Appear Here -->
+      </div>
+      <button id="add-course">Add Course</button>
+    </div>
+
+    <div class="card">
+      <div class="automation-controls">
+        <button id="start-btn">Start Automation</button>
+        <button id="stop-btn" class="hidden">Stop Automation</button>
+      </div>
+      <div id="status-area"></div>
+    </div>
+
+    <div class="card registered-courses">
+      <h2>Registered Courses</h2>
+      <ul id="registered-list">
+        <!-- Registered courses will be listed here -->
+      </ul>
+    </div>
+
+    <div class="card blocked-courses" id="blocked-courses-container">
+      <h2>Blocked Courses</h2>
+      <ul id="blocked-list">
+        <!-- Blocked courses will be listed here -->
+      </ul>
+    </div>
+  </div>
+
+  <div id="json-input-modal" class="hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Input Courses from JSON</h3>
+        <div class="modal-controls">
+          <button id="reset-json-btn" class="icon-btn" title="Reset">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3" />
+            </svg>
+          </button>
+          <button id="save-json-btn" class="icon-btn" title="Save">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+          </button>
+          <button id="close-json-btn" class="icon-btn danger" title="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <textarea id="json-input-area"></textarea>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
