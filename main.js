@@ -41,12 +41,12 @@ ipcMain.handle('start-automation', async (event, data) => {
     return { success: false, error: 'Automation is already running.' };
   }
 
-  const { creds, courses, autoLogin } = data;
-  const ipAddress = '14.139.251.105';
+  const { creds, courses, autoLogin, targetHost: customHost } = data;
+  const targetHost = customHost || 'exam-setu.dtu.ac.in';
   automationRunning = true;
 
   try {
-    startAutomation(creds, ipAddress, courses, autoLogin, {
+    startAutomation(creds, targetHost, courses, autoLogin, {
       onStatusUpdate: (message) => win.webContents.send('status-update', message),
       onCourseRegistered: (course) => win.webContents.send('course-registered', course),
       onCourseBlocked: (course) => win.webContents.send('course-blocked', course),

@@ -1,5 +1,6 @@
 // Required Modules
 const https = require('https');
+const crypto = require('crypto');
 const querystring = require('querystring');
 const cheerio = require('cheerio');
 const { performance } = require('perf_hooks');
@@ -34,16 +35,16 @@ function extractAndMergeCookies(headers, currentCookies) {
 }
 
 // Function to Perform Login Automation
-async function automateLogin({r,p}, ipAddress) {
+async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
   const got = (await import('got')).default;
 
   try {
     let cookies = "";
 
     // Step 1: GET `/` to retrieve initial cookies (e.g., `connect.sid`)
-    let response = await got(`https://${ipAddress}/`, {
+    let response = await got(`https://${targetHost}/`, {
       method: 'GET',
-      headers: getCommonHeaders(),
+      headers: getCommonHeaders(targetHost),
       responseType: 'text',
       agent: { https: httpsAgent },
       followRedirect: false,
@@ -60,17 +61,17 @@ async function automateLogin({r,p}, ipAddress) {
       password: p,
     });
 
-    response = await got(`https://${ipAddress}/student/login`, {
+    response = await got(`https://${targetHost}/student/login`, {
       method: 'POST',
       body: credentials,
       headers: {
-        "Host" : "reg.exam.dtu.ac.in",
+        "Host": targetHost,
         "Cache-Control": "max-age=0",
         "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"macOS"',
         "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-        "Origin": "https://reg.exam.dtu.ac.in",
+        "Origin": `https://${targetHost}`,
         "Content-Type": "application/x-www-form-urlencoded",
         "Upgrade-Insecure-Requests": "1",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -79,15 +80,15 @@ async function automateLogin({r,p}, ipAddress) {
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-User": "?1",
         "Sec-Fetch-Dest": "document",
-        "Referer" : "https://reg.exam.dtu.ac.in/student/login",
+        "Referer": `https://${targetHost}/student/login`,
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Priority": "u=0, i",
         "Connection": "keep-alive",
         'Cookie': cookies,
-        "DNT" : "1",
+        "DNT": "1",
       },
       responseType: 'text',
-      agent: {https: httpsAgent},
+      agent: { https: httpsAgent },
       followRedirect: false,
       throwHttpErrors: false,
     });
@@ -95,14 +96,40 @@ async function automateLogin({r,p}, ipAddress) {
     cookies = extractAndMergeCookies(response.headers, cookies);
     console.log('Step 2: Retrieved token and updated cookies:', cookies);
 
-    const match = response.body.match(/\/student\/home\/([a-zA-Z0-9]+)/);
+    const match = (response.headers['location'] || response.body).match(/\/student\/home\/([a-zA-Z0-9]+)/);
     let studentHash = "";
     if (match && match[1]) {
       studentHash = match[1];
       console.log('Extracted Student Hash:', studentHash);
     } else {
-      if (response.body.includes('Invalid Roll No or Password')) {
-          throw new Error('Invalid Roll Number or Password.');
+      // Check if redirected back to login (indicates invalid credentials)
+      if (
+        response.headers['location'] === '/student/login' ||
+        response.body.includes('Redirecting to /student/login') ||
+        response.body.includes('Invalid Roll No or Password') ||
+        response.body.includes('Invalid password') ||
+        response.body.includes('Student not found')
+      ) {
+        // Fetch the actual alert from /student/login if possible
+        try {
+          const loginCheck = await got(`https://${targetHost}/student/login`, {
+            headers: {
+              ...getCommonHeaders(targetHost),
+              'Cookie': cookies,
+            },
+            agent: { https: httpsAgent },
+            responseType: 'text',
+            throwHttpErrors: false,
+          });
+          const $ = cheerio.load(loginCheck.body);
+          const alertMsg = $('div.alert.alert-danger').text().replace(/\s+/g, ' ').replace('×', '').trim();
+          if (alertMsg) {
+            throw new Error(`Login failed: ${alertMsg}`);
+          }
+        } catch (fetchErr) {
+          if (fetchErr.message.startsWith('Login failed:')) throw fetchErr;
+        }
+        throw new Error('Invalid Roll Number or Password.');
       }
       throw new Error('Could not extract student hash from the login response.');
     }
@@ -114,7 +141,7 @@ async function automateLogin({r,p}, ipAddress) {
   }
 }
 
-async function automateLoginWithRetry(credentials, ipAddress, callbacks) {
+async function automateLoginWithRetry(credentials, targetHost, callbacks) {
   let attempts = 0;
   const delayTime = 2000; // 2 seconds — avoids hammering the DTU server
 
@@ -122,14 +149,14 @@ async function automateLoginWithRetry(credentials, ipAddress, callbacks) {
     try {
       attempts++;
       callbacks.onStatusUpdate(`Login attempt ${attempts}...`);
-      const result = await automateLogin(credentials, ipAddress);
+      const result = await automateLogin(credentials, targetHost);
       callbacks.onStatusUpdate('Login successful.');
       return result;
     } catch (error) {
       if (!isRunning) {
         break;
       }
-      if (error.message === 'Invalid Roll Number or Password.') {
+      if (error.message.includes('Invalid Roll Number or Password') || error.message.startsWith('Login failed:')) {
         throw error; // Do not retry on invalid credentials
       }
       callbacks.onStatusUpdate(`Login failed: ${error.message}. Retrying in ${delayTime}ms...`);
@@ -140,15 +167,15 @@ async function automateLoginWithRetry(credentials, ipAddress, callbacks) {
 }
 
 // Function to Fetch Course Registration HTML Content
-async function fetchCourseRegHTML(cookies, studentHash, ipAddress) {
+async function fetchCourseRegHTML(cookies, studentHash, targetHost = 'exam-setu.dtu.ac.in') {
   const { default: got } = await import('got');
 
   try {
-    const response = await got(`https://${ipAddress}/student/courseRegistration/${studentHash}`, {
+    const response = await got(`https://${targetHost}/student/courseRegistration/${studentHash}`, {
       method: 'GET',
       headers: {
-        ...getCommonHeaders(),
-        'Referer': `https://reg.exam.dtu.ac.in/student/home/${studentHash}`,
+        ...getCommonHeaders(targetHost),
+        'Referer': `https://${targetHost}/student/home/${studentHash}`,
         'Cookie': cookies,
       },
       agent: { https: httpsAgent },
@@ -170,8 +197,8 @@ async function fetchCourseRegHTML(cookies, studentHash, ipAddress) {
 }
 
 // Function to Fetch and Track Desired Courses
-async function fetchTrackedCourses(cookies, studentHash, ipAddress, courseCodes) {
-  const htmlContent = await fetchCourseRegHTML(cookies, studentHash, ipAddress);
+async function fetchTrackedCourses(cookies, studentHash, targetHost = 'exam-setu.dtu.ac.in', courseCodes) {
+  const htmlContent = await fetchCourseRegHTML(cookies, studentHash, targetHost);
 
   if (!htmlContent) {
     throw new Error("No HTML content fetched for course registration.");
@@ -231,14 +258,14 @@ async function fetchTrackedCourses(cookies, studentHash, ipAddress, courseCodes)
 }
 
 // Function to Send POST Request for Course Registration
-const sendPostReq = async (cookies, studentHash, ipAddress, courseHash) => {
+const sendPostReq = async (cookies, studentHash, targetHost = 'exam-setu.dtu.ac.in', courseHash) => {
   const { default: got } = await import('got');
 
   try {
-    const response = await got.post(`https://${ipAddress}/student/courseRegister/${studentHash}/${courseHash}`, {
+    const response = await got.post(`https://${targetHost}/student/courseRegister/${studentHash}/${courseHash}`, {
       headers: {
-        ...getCommonHeaders(),
-        'Referer': `https://reg.exam.dtu.ac.in/student/courseRegistration/${studentHash}`,
+        ...getCommonHeaders(targetHost),
+        'Referer': `https://${targetHost}/student/courseRegistration/${studentHash}`,
         'Cookie': cookies,
         'Content-Length': '0',
       },
@@ -257,7 +284,7 @@ const sendPostReq = async (cookies, studentHash, ipAddress, courseHash) => {
 let isRunning = false;
 
 // Handler Logic to Monitor and Register Courses
-const handlerLogic = async (session, ipAddress, trackedCourses, autoLogin, credentials, callbacks) => {
+const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', trackedCourses, autoLogin, credentials, callbacks) => {
   const { default: got } = await import('got');
   let previousEtag = null;
   let currentSession = session;
@@ -265,11 +292,11 @@ const handlerLogic = async (session, ipAddress, trackedCourses, autoLogin, crede
   const sendGetReq = async () => {
     if (!isRunning) return null;
     try {
-      const response = await got(`https://${ipAddress}/student/courseRegistration/${currentSession.studentHash}`, {
+      const response = await got(`https://${targetHost}/student/courseRegistration/${currentSession.studentHash}`, {
         method: 'GET',
         headers: {
-          ...getCommonHeaders(),
-          'Referer': `https://reg.exam.dtu.ac.in/student/home/${currentSession.studentHash}`,
+          ...getCommonHeaders(targetHost),
+          'Referer': `https://${targetHost}/student/home/${currentSession.studentHash}`,
           'Cookie': currentSession.cookies,
         },
         agent: { https: httpsAgent },
@@ -277,17 +304,21 @@ const handlerLogic = async (session, ipAddress, trackedCourses, autoLogin, crede
         followRedirect: false,
       });
 
-      const currentEtag = response.headers['etag'];
+      const currentEtag = response.headers['etag'] || crypto.createHash('md5').update(response.body).digest('hex');
       if (previousEtag && currentEtag === previousEtag) {
-        callbacks.onStatusUpdate('No updates found (ETag unchanged).');
+        callbacks.onStatusUpdate('No updates found (page unchanged).');
         return null;
       }
-      callbacks.onStatusUpdate('New data fetched (ETag changed).');
+      callbacks.onStatusUpdate('Seat data checked (updates received).');
       previousEtag = currentEtag;
 
       const $ = cheerio.load(response.body);
 
-      if (response.body.length < 18000 && $('p').text().includes('Found. Redirecting to /student/login')) {
+      const isRedirectToLogin = 
+        (response.statusCode === 302 && response.headers['location']?.includes('/student/login')) ||
+        (response.body.length < 18000 && (response.body.includes('Redirecting to /student/login') || $('p').text().includes('Found. Redirecting to /student/login')));
+
+      if (isRedirectToLogin) {
         throw new Error("Session Expired");
       }
 
@@ -329,7 +360,7 @@ const handlerLogic = async (session, ipAddress, trackedCourses, autoLogin, crede
       if (autoLogin && error.message.includes("Session Expired")) {
         callbacks.onStatusUpdate("Session expired. Attempting to re-login...");
         try {
-          currentSession = await automateLoginWithRetry(credentials, ipAddress, callbacks);
+          currentSession = await automateLoginWithRetry(credentials, targetHost, callbacks);
           callbacks.onStatusUpdate("Session re-initiated successfully.");
         } catch (loginError) {
           callbacks.onError(loginError.message);
@@ -385,7 +416,7 @@ const handlerLogic = async (session, ipAddress, trackedCourses, autoLogin, crede
             }
 
             if (newSeats > 0) {
-              await sendPostReq(currentSession.cookies, currentSession.studentHash, ipAddress, courseHash);
+              await sendPostReq(currentSession.cookies, currentSession.studentHash, targetHost, courseHash);
               callbacks.onStatusUpdate(`Attempting to register for ${courseCode}...`);
               registeredSomething = true;
               break;
@@ -413,9 +444,9 @@ const handlerLogic = async (session, ipAddress, trackedCourses, autoLogin, crede
 };
 
 // Utility Function to Get Common Headers
-function getCommonHeaders() {
+function getCommonHeaders(host = 'exam-setu.dtu.ac.in') {
   return {
-    "Host": "reg.exam.dtu.ac.in",
+    "Host": host,
     "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"macOS"',
@@ -464,19 +495,19 @@ function gatherSlotRows(slotHeader) {
 }
 
 // Main Execution Function
-async function startAutomation(credentials, ipAddress, courseIdsToTrack, autoLogin, callbacks) {
+async function startAutomation(credentials, targetHost = 'exam-setu.dtu.ac.in', courseIdsToTrack, autoLogin, callbacks) {
   isRunning = true;
   try {
     let session;
     if (autoLogin) {
-      session = await automateLoginWithRetry(credentials, ipAddress, callbacks);
+      session = await automateLoginWithRetry(credentials, targetHost, callbacks);
     } else {
       callbacks.onStatusUpdate('Attempting to log in...');
-      session = await automateLogin(credentials, ipAddress);
+      session = await automateLogin(credentials, targetHost);
     }
 
     callbacks.onStatusUpdate('Login successful. Fetching courses...');
-    const trackedCourses = await fetchTrackedCourses(session.cookies, session.studentHash, ipAddress, courseIdsToTrack);
+    const trackedCourses = await fetchTrackedCourses(session.cookies, session.studentHash, targetHost, courseIdsToTrack);
 
     if (trackedCourses.size === 0) {
       throw new Error("No courses to track. They may already be registered or the list is empty.");
@@ -499,7 +530,7 @@ async function startAutomation(credentials, ipAddress, courseIdsToTrack, autoLog
       originalOnCourseRegistered(course);
     };
 
-    await handlerLogic(session, ipAddress, trackedCourses, autoLogin, credentials, callbacks);
+    await handlerLogic(session, targetHost, trackedCourses, autoLogin, credentials, callbacks);
   } catch (error) {
     callbacks.onError(error.message);
   } finally {

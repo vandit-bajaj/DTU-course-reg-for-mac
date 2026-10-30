@@ -21,7 +21,7 @@
 
 ## 📖 About the Project
 
-**DTU Course Registrar** is an automated desktop application built specifically for **Delhi Technological University (DTU)** students running macOS. It continuously monitors the official DTU course registration portal (`reg.exam.dtu.ac.in`) and automatically snipes target elective courses the millisecond a seat becomes vacant.
+**DTU Course Registrar** is an automated desktop application built specifically for **Delhi Technological University (DTU)** students running macOS. It continuously monitors the official DTU ExamSetu course registration portal (`exam-setu.dtu.ac.in`) and automatically snipes target elective courses the millisecond a seat becomes vacant.
 
 ### The Problem
 During DTU course registration windows (DEC, GEC, SEC, VAC electives), thousands of students attempt to register simultaneously:
@@ -46,7 +46,7 @@ DTU Course Registrar bypasses the browser rendering pipeline entirely. It direct
 
 ## ⚙️ How It Works
 
-1. **Authentication**: Authenticates directly with `reg.exam.dtu.ac.in` using your Roll Number and Password to establish a secure session (`connect.sid`).
+1. **Authentication**: Authenticates directly with `exam-setu.dtu.ac.in` using your Roll Number and Password to establish a secure session (`connect.sid`).
 2. **Table Scraping**: Parses elective tables and course hashes required for registration.
 3. **High-Frequency Polling**: Periodically requests seat counts (~900ms interval).
 4. **Instant Registration**: When a seat opens (`available > 0`), it immediately dispatches the registration payload.
