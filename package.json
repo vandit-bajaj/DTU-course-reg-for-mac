@@ -25,6 +25,7 @@
   "build": {
     "appId": "com.vanditbajaj.dtu-course-registrar",
     "productName": "DTU Course Registrar",
+    "afterPack": "./scripts/afterPack.js",
     "directories": {
       "output": "dist"
     },
