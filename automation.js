@@ -265,6 +265,28 @@ async function fetchTrackedCourses(cookies, studentHash, targetHost = 'exam-setu
   }
 }
 
+// Function to Fetch and Track Desired Courses with Retry on Server Lag or Early Launch
+async function fetchTrackedCoursesWithRetry(cookies, studentHash, targetHost, courseCodes, callbacks) {
+  let attempts = 0;
+  const delayTime = 2000;
+
+  while (isRunning) {
+    attempts++;
+    try {
+      callbacks.onStatusUpdate(`Fetching course registration table (attempt ${attempts})...`);
+      const trackedCourses = await fetchTrackedCourses(cookies, studentHash, targetHost, courseCodes);
+      if (trackedCourses && trackedCourses.size > 0) {
+        return trackedCourses;
+      }
+    } catch (error) {
+      if (!isRunning) break;
+      callbacks.onStatusUpdate(`Waiting for course table / retrying after server lag (${error.message}). Retrying in ${delayTime}ms...`);
+      await delay(delayTime);
+    }
+  }
+  throw new Error("Automation stopped while waiting for course registration table.");
+}
+
 // Function to Send POST Request for Course Registration
 const sendPostReq = async (cookies, studentHash, targetHost = 'exam-setu.dtu.ac.in', courseHash) => {
   const { default: got } = await import('got');
@@ -450,9 +472,14 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
               if (Date.now() - lastAttempt > 3000) {
                 registrationAttempts.set(courseHash, Date.now());
                 callbacks.onStatusUpdate(`Attempting to register for ${courseCode} (${courseData.courseSlot})...`);
-                await sendPostReq(currentSession.cookies, currentSession.studentHash, targetHost, courseHash);
-                registeredSomething = true;
-                break;
+                const postRes = await sendPostReq(currentSession.cookies, currentSession.studentHash, targetHost, courseHash);
+                if (postRes && postRes.success) {
+                  registeredSomething = true;
+                  break;
+                } else {
+                  // If request failed (e.g. server 504 / timeout / network drop), clear cooldown so it retries next poll
+                  registrationAttempts.delete(courseHash);
+                }
               }
             }
           }
@@ -541,7 +568,7 @@ async function startAutomation(credentials, targetHost = 'exam-setu.dtu.ac.in', 
     }
 
     callbacks.onStatusUpdate('Login successful. Fetching courses...');
-    const trackedCourses = await fetchTrackedCourses(session.cookies, session.studentHash, targetHost, courseIdsToTrack);
+    const trackedCourses = await fetchTrackedCoursesWithRetry(session.cookies, session.studentHash, targetHost, courseIdsToTrack, callbacks);
 
     if (trackedCourses.size === 0) {
       throw new Error("No courses to track. They may already be registered or the list is empty.");
