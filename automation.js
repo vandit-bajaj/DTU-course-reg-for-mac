@@ -49,6 +49,7 @@ async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
       agent: { https: httpsAgent },
       followRedirect: false,
       throwHttpErrors: false,
+      timeout: { request: 6000 },
     });
 
     // Merge cookies from the initial response
@@ -81,7 +82,7 @@ async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
         "Sec-Fetch-User": "?1",
         "Sec-Fetch-Dest": "document",
         "Referer": `https://${targetHost}/student/login`,
-        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Encoding": "gzip, deflate, br",
         "Priority": "u=0, i",
         "Connection": "keep-alive",
         'Cookie': cookies,
@@ -91,6 +92,7 @@ async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
       agent: { https: httpsAgent },
       followRedirect: false,
       throwHttpErrors: false,
+      timeout: { request: 6000 },
     });
 
     cookies = extractAndMergeCookies(response.headers, cookies);
@@ -181,6 +183,7 @@ async function fetchCourseRegHTML(cookies, studentHash, targetHost = 'exam-setu.
       agent: { https: httpsAgent },
       responseType: 'text',
       followRedirect: false,
+      timeout: { request: 6000 },
     });
 
     if (response.statusCode !== 200) {
@@ -191,7 +194,7 @@ async function fetchCourseRegHTML(cookies, studentHash, targetHost = 'exam-setu.
     // console.log(response.body);
     return response.body;
   } catch (error) {
-    console.warn("Warning: Unable to fetch course registration HTML content.", error);
+    console.warn("Warning: Unable to fetch course registration HTML content.", error.message);
     return null;
   }
 }
@@ -208,24 +211,31 @@ async function fetchTrackedCourses(cookies, studentHash, targetHost = 'exam-setu
     const $ = cheerio.load(htmlContent);
     const trackedCourses = new Map();
 
+    // Normalize targets to uppercase trimmed strings
     const parsedCourses = new Map(
       courseCodes.map(code => {
         const [courseCode, courseSlot] = code.split(":");
-        return [courseCode, courseSlot];
+        return [(courseCode || '').trim().toUpperCase(), (courseSlot || '').trim().toUpperCase()];
       })
     );
 
-    $("div.elective-subjects.table-responsive table.table-hover.table-bordered tbody tr:not(.setHeader)").each((_, row) => {
+    // Resilient table selector: tries specific elective wrapper first, then general table
+    let rows = $("div.elective-subjects table tbody tr:not(.setHeader)");
+    if (rows.length === 0) {
+      rows = $("table.table tbody tr:not(.setHeader)");
+    }
+    if (rows.length === 0) {
+      rows = $("table tbody tr:not(.setHeader)");
+    }
+
+    rows.each((_, row) => {
       const cells = $(row).find("td");
-      if (cells.length === 6) {
-        const courseCode = $(cells[1]).text().trim();
-        // console.log(`Processing Course: ${courseCode}`);
-        const courseSlot = $(cells[3]).text().trim();
-        // console.log(`Course Slot: ${courseSlot}`);
+      if (cells.length >= 5) {
+        const courseCode = $(cells[1]).text().trim().toUpperCase();
+        const courseSlot = $(cells[3]).text().trim().toUpperCase();
         const seats = parseInt($(cells[4]).text().trim(), 10) || 0;
-        // console.log(`Available Seats: ${seats}`);
-        const formAction = $(cells[5]).find("form").attr("action");
-        // console.log(`Form Action: ${formAction}`);
+        const formAction = $(cells[5]).find("form").attr("action") || $(row).find("form").attr("action");
+
         if (formAction) {
           const courseHashMatch = formAction.match(new RegExp(`/student/courseRegister/${studentHash}/([a-zA-Z0-9]+)`));
           const courseHash = courseHashMatch ? courseHashMatch[1] : null;
@@ -236,7 +246,7 @@ async function fetchTrackedCourses(cookies, studentHash, targetHost = 'exam-setu
               courseSlot,
               seats,
             });
-            parsedCourses.delete(courseCode); // Remove found 
+            parsedCourses.delete(courseCode); // Remove found course
             console.log(`Tracking Course: ${courseCode} (Slot: ${courseSlot}) with Hash: ${courseHash} and Seats: ${seats}`);
           }
         }
@@ -244,16 +254,14 @@ async function fetchTrackedCourses(cookies, studentHash, targetHost = 'exam-setu
     });
 
     // Check for courses that were not found
-    // console.log(parsedCourses);
     if (parsedCourses.size > 0) {
       const notFound = Array.from(parsedCourses.keys()).join(', ');
       throw new Error(`The following course(s) were not found: ${notFound}. Please check the course code and slot.`);
     }
-    // console.log(`Total Courses Being Tracked: ${trackedCourses}`);
     return trackedCourses;
   } catch (error) {
-    console.error("Error processing courses:", error);
-    return new Map();
+    console.error("Error processing courses:", error.message);
+    throw error;
   }
 }
 
@@ -273,11 +281,14 @@ const sendPostReq = async (cookies, studentHash, targetHost = 'exam-setu.dtu.ac.
       agent: { https: httpsAgent },
       throwHttpErrors: false,
       followRedirect: false,
+      timeout: { request: 5000 },
     });
 
     console.log(`POST Request to register course ${courseHash} - Status Code: ${response.statusCode}`);
+    return { success: response.statusCode === 200 || response.statusCode === 302, statusCode: response.statusCode };
   } catch (error) {
     console.error("Error sending POST request:", error.message);
+    return { success: false, error: error.message };
   }
 };
 
@@ -288,6 +299,7 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
   const { default: got } = await import('got');
   let previousEtag = null;
   let currentSession = session;
+  const registrationAttempts = new Map(); // Course registration attempt timestamp tracker
 
   const sendGetReq = async () => {
     if (!isRunning) return null;
@@ -302,17 +314,20 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
         agent: { https: httpsAgent },
         responseType: 'text',
         followRedirect: false,
+        timeout: { request: 5000 },
       });
 
-      const currentEtag = response.headers['etag'] || crypto.createHash('md5').update(response.body).digest('hex');
+      const $ = cheerio.load(response.body);
+
+      // Targeted hashing of elective course table to avoid false positives from changing timestamps/banners
+      const tableContent = $('div.elective-subjects, table').html() || response.body;
+      const currentEtag = response.headers['etag'] || crypto.createHash('md5').update(tableContent).digest('hex');
       if (previousEtag && currentEtag === previousEtag) {
         callbacks.onStatusUpdate('No updates found (page unchanged).');
         return null;
       }
       callbacks.onStatusUpdate('Seat data checked (updates received).');
       previousEtag = currentEtag;
-
-      const $ = cheerio.load(response.body);
 
       const isRedirectToLogin = 
         (response.statusCode === 302 && response.headers['location']?.includes('/student/login')) ||
@@ -357,27 +372,32 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
     } catch (error) {
       if (!isRunning) throw error;
 
-      if (autoLogin && error.message.includes("Session Expired")) {
-        callbacks.onStatusUpdate("Session expired. Attempting to re-login...");
-        try {
-          currentSession = await automateLoginWithRetry(credentials, targetHost, callbacks);
-          callbacks.onStatusUpdate("Session re-initiated successfully.");
-        } catch (loginError) {
-          callbacks.onError(loginError.message);
-          throw loginError; // Stop if relogin fails (e.g., invalid credentials)
+      if (error.message.includes("Session Expired")) {
+        if (autoLogin) {
+          callbacks.onStatusUpdate("Session expired. Attempting to re-login...");
+          try {
+            currentSession = await automateLoginWithRetry(credentials, targetHost, callbacks);
+            callbacks.onStatusUpdate("Session re-initiated successfully.");
+            return null; // Retry the GET request with the new session
+          } catch (loginError) {
+            callbacks.onError(loginError.message);
+            throw loginError;
+          }
+        } else {
+          callbacks.onError("Session expired. Auto-login is disabled. Please restart and log in again.");
+          throw error;
         }
-        return null; // Retry the GET request with the new session
       }
 
       // Handle HTTP errors (e.g., 404, 5xx) by retrying
       if (error.response && error.response.statusCode) {
         callbacks.onStatusUpdate(`Request failed with status ${error.response.statusCode}. Retrying...`);
-        return null; // Returning null will cause a retry after 900ms in the main loop
+        return null;
       }
 
-      // Handle other errors (e.g., network issues)
-      callbacks.onError(`An unexpected error occurred: ${error.message}. Retrying...`);
-      return null; // Returning null will cause a retry
+      // Handle other errors (e.g., timeout, network drop)
+      callbacks.onStatusUpdate(`Network warning: ${error.message}. Retrying...`);
+      return null;
     }
   };
 
@@ -394,7 +414,16 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
 
       for (const [courseSlot, courses] of slotsToTrack.entries()) {
         if (!isRunning) return;
-        const slotHeader = $(`tr.setHeader td[colspan="3"]:contains(${courseSlot})`);
+
+        // Resilient slot header matching: checks for slot text case-insensitively regardless of colspan
+        let slotHeader = $(`tr.setHeader td:contains(${courseSlot})`);
+        if (slotHeader.length === 0) {
+          $(`tr.setHeader`).each((_, hRow) => {
+            if ($(hRow).text().toUpperCase().includes(courseSlot.toUpperCase())) {
+              slotHeader = $(hRow).find("td").first();
+            }
+          });
+        }
         if (slotHeader.length === 0) continue;
 
         const slotRows = gatherSlotRows(slotHeader);
@@ -402,8 +431,8 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
         for (const row of slotRows) {
           if (!isRunning) return;
           const cells = $(row).find("td");
-          const courseCode = $(cells[1]).text().trim();
-          const courseData = courses.find(c => c.courseCode === courseCode);
+          const courseCode = $(cells[1]).text().trim().toUpperCase();
+          const courseData = courses.find(c => c.courseCode.toUpperCase() === courseCode);
 
           if (courseData) {
             const { courseHash, seats: trackedSeats } = courseData;
@@ -416,10 +445,15 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
             }
 
             if (newSeats > 0) {
-              await sendPostReq(currentSession.cookies, currentSession.studentHash, targetHost, courseHash);
-              callbacks.onStatusUpdate(`Attempting to register for ${courseCode}...`);
-              registeredSomething = true;
-              break;
+              // Duplicate protection: prevent repeated POST spam within 3 seconds for same course hash
+              const lastAttempt = registrationAttempts.get(courseHash) || 0;
+              if (Date.now() - lastAttempt > 3000) {
+                registrationAttempts.set(courseHash, Date.now());
+                callbacks.onStatusUpdate(`Attempting to register for ${courseCode} (${courseData.courseSlot})...`);
+                await sendPostReq(currentSession.cookies, currentSession.studentHash, targetHost, courseHash);
+                registeredSomething = true;
+                break;
+              }
             }
           }
         }
@@ -458,7 +492,7 @@ function getCommonHeaders(host = 'exam-setu.dtu.ac.in') {
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-User": "?1",
     "Sec-Fetch-Dest": "document",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Encoding": "gzip, deflate, br",
     "Priority": "u=0, i",
     "Connection": "keep-alive",
     "DNT": "1",

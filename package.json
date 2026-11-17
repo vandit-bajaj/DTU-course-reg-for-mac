@@ -16,6 +16,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "test": "node test_comprehensive_audit.js && node test_reliability_stress.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
