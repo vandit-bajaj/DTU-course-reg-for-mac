@@ -69,6 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
     eyeClosed.classList.toggle('hidden');
   });
 
+  // Sound Alerts Toggle
+  const soundAlertsCheckbox = document.getElementById('sound-alerts');
+  if (soundAlertsCheckbox) {
+    soundAlertsCheckbox.addEventListener('change', () => {
+      window.electronAPI.setSoundEnabled(soundAlertsCheckbox.checked);
+    });
+  }
+
   // Function to display errors
   function showError(message) {
     errorArea.textContent = message;
@@ -91,6 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('roll-no').disabled = isAutomationRunning;
     document.getElementById('password').disabled = isAutomationRunning;
     document.getElementById('auto-login').disabled = isAutomationRunning;
+    const soundAlerts = document.getElementById('sound-alerts');
+    if (soundAlerts) soundAlerts.disabled = isAutomationRunning;
 
     const courseRows = document.querySelectorAll('.course-row input, .course-row button');
     courseRows.forEach(element => {
@@ -147,8 +157,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setUIState(isAutomationRunning);
     statusArea.textContent = 'Starting auto-login...';
 
+    const soundAlerts = document.getElementById('sound-alerts')?.checked ?? true;
+
     const response = await window.electronAPI.loginAndOpenPortal({
       creds: { r: rollNo, p: password },
+      soundAlerts: soundAlerts,
     });
 
     if (!response.success) {
@@ -191,10 +204,13 @@ document.addEventListener('DOMContentLoaded', () => {
     setUIState(isAutomationRunning);
     statusArea.textContent = 'Starting automation...';
 
+    const soundAlerts = document.getElementById('sound-alerts')?.checked ?? true;
+
     const response = await window.electronAPI.startAutomation({
       creds: { r: rollNo, p: password },
       courses: courses,
       autoLogin: autoLogin,
+      soundAlerts: soundAlerts,
     });
 
     if (!response.success) {

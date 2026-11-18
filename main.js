@@ -2,12 +2,39 @@
 
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
+const { execFile } = require('child_process');
 const notifier = require('node-notifier');
 const { startAutomation, stopAutomation, loginOnlyWithRetry } = require('./automation');
 
 let win;
 let automationRunning = false;
 let activeManualLoginCancel = null;
+let soundAlertsEnabled = true;
+
+function playSound(type) {
+  if (!soundAlertsEnabled) return;
+
+  // macOS system sound files (bells, chimes, fanfares, and alerts)
+  const soundMap = {
+    start: '/System/Library/Sounds/Tink.aiff',      // crisp bell ding when automation starts
+    login: '/System/Library/Sounds/Glass.aiff',     // resonant crystal bell on login success
+    success: '/System/Library/Sounds/Hero.aiff',    // victorious fanfare on course registered
+    error: '/System/Library/Sounds/Basso.aiff',     // deep tone when stopped by error
+    alert: '/System/Library/Sounds/Sosumi.aiff',    // alert chime on CAPTCHA / action required
+    stop: '/System/Library/Sounds/Pop.aiff',        // clean pop on user stop
+  };
+
+  const soundFile = soundMap[type] || soundMap.start;
+
+  if (process.platform === 'darwin') {
+    execFile('/usr/bin/afplay', [soundFile], () => {});
+  } else {
+    try {
+      const { shell } = require('electron');
+      shell.beep();
+    } catch (_) {}
+  }
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -43,16 +70,32 @@ ipcMain.handle('start-automation', async (event, data) => {
     return { success: false, error: 'Automation is already running.' };
   }
 
-  const { creds, courses, autoLogin, targetHost: customHost } = data;
+  const { creds, courses, autoLogin, soundAlerts, targetHost: customHost } = data;
+  if (typeof soundAlerts === 'boolean') {
+    soundAlertsEnabled = soundAlerts;
+  }
   const targetHost = customHost || 'exam-setu.dtu.ac.in';
   automationRunning = true;
+  playSound('start');
 
   try {
     startAutomation(creds, targetHost, courses, autoLogin, {
+      onLoginSuccess: () => {
+        playSound('login');
+      },
       onStatusUpdate: (message) => win.webContents.send('status-update', message),
-      onCourseRegistered: (course) => win.webContents.send('course-registered', course),
-      onCourseBlocked: (course) => win.webContents.send('course-blocked', course),
-      onError: (error) => win.webContents.send('automation-error', error),
+      onCourseRegistered: (course) => {
+        playSound('success');
+        win.webContents.send('course-registered', course);
+      },
+      onCourseBlocked: (course) => {
+        playSound('alert');
+        win.webContents.send('course-blocked', course);
+      },
+      onError: (error) => {
+        playSound('error');
+        win.webContents.send('automation-error', error);
+      },
       onStop: () => {
         automationRunning = false;
         win.webContents.send('status-update', 'Automation stopped.');
@@ -60,6 +103,7 @@ ipcMain.handle('start-automation', async (event, data) => {
     });
     return { success: true };
   } catch (error) {
+    playSound('error');
     automationRunning = false;
     return { success: false, error: error.message };
   }
@@ -70,10 +114,14 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
     return { success: false, error: 'Another task is already running.' };
   }
 
-  const { creds, targetHost: customHost } = data;
+  const { creds, soundAlerts, targetHost: customHost } = data;
+  if (typeof soundAlerts === 'boolean') {
+    soundAlertsEnabled = soundAlerts;
+  }
   const targetHost = customHost || 'exam-setu.dtu.ac.in';
   const loginUrl = `https://${targetHost}/student/login`;
   automationRunning = true;
+  playSound('start');
 
   const portalSession = session.fromPartition(`portal-${Date.now()}`);
   const portalWin = new BrowserWindow({
@@ -156,6 +204,8 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
         automationRunning = false;
         activeManualLoginCancel = null;
 
+        playSound('login');
+
         notifier.notify({
           title: 'ExamSetu Logged In! 🎉',
           message: 'Dashboard loaded! Click Course Registration and complete CAPTCHA manually.',
@@ -214,6 +264,7 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
         `);
 
         if (result.status === 'captcha') {
+          playSound('alert');
           autoLoginActive = false;
           automationRunning = false;
           activeManualLoginCancel = null;
@@ -221,6 +272,7 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
             win.webContents.send('automation-error', 'Security verification / CAPTCHA detected on login. Please complete it manually in the portal window.');
           }
         } else if (result.status === 'alert') {
+          playSound('error');
           autoLoginActive = false;
           automationRunning = false;
           activeManualLoginCancel = null;
@@ -256,6 +308,17 @@ ipcMain.handle('stop-automation', async () => {
   if (automationRunning) {
     stopAutomation();
     automationRunning = false;
+    playSound('stop');
   }
+  return { success: true };
+});
+
+ipcMain.handle('set-sound-enabled', (event, enabled) => {
+  soundAlertsEnabled = !!enabled;
+  return { success: true };
+});
+
+ipcMain.handle('play-sound', (event, type) => {
+  playSound(type);
   return { success: true };
 });

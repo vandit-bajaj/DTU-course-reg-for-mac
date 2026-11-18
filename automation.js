@@ -422,6 +422,9 @@ const handlerLogic = async (session, targetHost = 'exam-setu.dtu.ac.in', tracked
           try {
             currentSession = await automateLoginWithRetry(credentials, targetHost, callbacks);
             callbacks.onStatusUpdate("Session re-initiated successfully.");
+            if (callbacks && callbacks.onLoginSuccess) {
+              callbacks.onLoginSuccess(currentSession);
+            }
             return null; // Retry the GET request with the new session
           } catch (loginError) {
             callbacks.onError(loginError.message);
@@ -589,6 +592,10 @@ async function startAutomation(credentials, targetHost = 'exam-setu.dtu.ac.in', 
       session = await automateLogin(credentials, targetHost);
     }
 
+    if (callbacks && callbacks.onLoginSuccess) {
+      callbacks.onLoginSuccess(session);
+    }
+
     callbacks.onStatusUpdate('Login successful. Fetching courses...');
     const trackedCourses = await fetchTrackedCoursesWithRetry(session.cookies, session.studentHash, targetHost, courseIdsToTrack, callbacks);
 
@@ -628,6 +635,9 @@ async function loginOnlyWithRetry(credentials, targetHost = 'exam-setu.dtu.ac.in
   isRunning = true;
   try {
     const session = await automateLoginWithRetry(credentials, targetHost, callbacks);
+    if (callbacks && callbacks.onLoginSuccess) {
+      callbacks.onLoginSuccess(session);
+    }
     return session;
   } finally {
     isRunning = false;

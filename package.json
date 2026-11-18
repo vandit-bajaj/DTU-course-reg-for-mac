@@ -1,6 +1,6 @@
 {
   "name": "dtu-course-registrar",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Automated course seat monitor and registrar for DTU students — snipes elective seats the moment they open.",
   "main": "main.js",
   "author": {

@@ -39,7 +39,13 @@ DTU Course Registrar bypasses the browser rendering pipeline entirely. It direct
 - 🛡️ **CAPTCHA & Invalid Credential Guard**: Stops auto-login immediately if a security challenge/CAPTCHA or invalid-credential alert appears, letting you complete it manually.
 - ⚡ **Sub-100ms Seat Polling**: Connects directly to `exam-setu.dtu.ac.in` over persistent Keep-Alive HTTPS connections with MD5/ETag content caching to minimize overhead.
 - 🔄 **Session Recovery**: Automatically re-authenticates if the DTU portal invalidates your session cookie.
-- 🔔 **Native macOS Notifications**: Sends alerts via Apple Notification Center with sound the moment login succeeds or courses are secured.
+- 🔔 **Native macOS Bell & Audio Alerts — *New in v1.2.0***: Plays distinct native macOS audio chimes:
+  - 🔔 **Start**: Crisp bell ding (`Tink`) when automation or auto-login starts.
+  - 🛎️ **Login Success**: Resonant crystal bell (`Glass`) the instant the bot logs into DTU ExamSetu.
+  - 🎉 **Course Registered**: Triumphant fanfare (`Hero`) when a seat is successfully secured.
+  - ⚠️ **Error Stopped**: Alert tone (`Basso`) if an error or connection failure stops the bot.
+  - ✋ **Prompt / CAPTCHA**: Prompt chime (`Sosumi`) if manual action or CAPTCHA is needed.
+  - *Includes an in-app toggle to easily enable or mute audio alerts.*
 - 📝 **Dual Course Input**: Add courses individually through interactive inputs or paste full batches using the built-in JSON editor.
 - 🔒 **Zero Disk Footprint**: Credentials and session tokens are strictly kept in volatile memory and are never written to disk or transmitted to third parties.
 
