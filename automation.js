@@ -19,19 +19,29 @@ function extractAndMergeCookies(headers, currentCookies) {
   const setCookies = headers['set-cookie'];
   if (setCookies) {
     const newCookies = setCookies.map(cookie => cookie.split(';')[0]);
-    const cookieMap = new Map(
-      (currentCookies || '')
-        .split('; ')
-        .filter(Boolean)
-        .map(cookie => cookie.split('='))
-    );
+    const cookieMap = new Map();
+    (currentCookies || '')
+      .split('; ')
+      .filter(Boolean)
+      .forEach(cookie => {
+        const idx = cookie.indexOf('=');
+        if (idx > 0) cookieMap.set(cookie.slice(0, idx), cookie.slice(idx + 1));
+      });
     newCookies.forEach(cookie => {
-      const [key, value] = cookie.split('=');
-      cookieMap.set(key, value);
+      const idx = cookie.indexOf('=');
+      if (idx > 0) cookieMap.set(cookie.slice(0, idx), cookie.slice(idx + 1));
     });
     return Array.from(cookieMap.entries()).map(([key, value]) => `${key}=${value}`).join('; ');
   }
   return currentCookies || '';
+}
+
+function hasSecurityChallenge(response) {
+  const body = response && typeof response.body === 'string' ? response.body : '';
+  return (
+    response.statusCode === 403 ||
+    /cf-challenge|Just a moment\.\.\.|g-recaptcha|h-captcha|cf-turnstile/i.test(body)
+  );
 }
 
 // Function to Perform Login Automation
@@ -49,8 +59,12 @@ async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
       agent: { https: httpsAgent },
       followRedirect: false,
       throwHttpErrors: false,
-      timeout: { request: 6000 },
+      timeout: { request: 15000 },
     });
+
+    if (hasSecurityChallenge(response)) {
+      throw new Error('CAPTCHA_REQUIRED: Security verification/CAPTCHA detected on portal. Please log in manually in the browser.');
+    }
 
     // Merge cookies from the initial response
     cookies = extractAndMergeCookies(response.headers, cookies);
@@ -92,8 +106,16 @@ async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
       agent: { https: httpsAgent },
       followRedirect: false,
       throwHttpErrors: false,
-      timeout: { request: 6000 },
+      timeout: { request: 15000 },
     });
+
+    if (hasSecurityChallenge(response)) {
+      throw new Error('CAPTCHA_REQUIRED: Security verification/CAPTCHA detected on login. Please log in manually in the browser.');
+    }
+
+    if (response.statusCode >= 500) {
+      throw new Error(`DTU server overloaded (HTTP ${response.statusCode})`);
+    }
 
     cookies = extractAndMergeCookies(response.headers, cookies);
     console.log('Step 2: Retrieved token and updated cookies:', cookies);
@@ -145,7 +167,7 @@ async function automateLogin({r,p}, targetHost = 'exam-setu.dtu.ac.in') {
 
 async function automateLoginWithRetry(credentials, targetHost, callbacks) {
   let attempts = 0;
-  const delayTime = 2000; // 2 seconds — avoids hammering the DTU server
+  const delayTime = 2500; // 2.5 seconds — avoids hammering the DTU server
 
   while (isRunning) {
     try {
@@ -158,8 +180,12 @@ async function automateLoginWithRetry(credentials, targetHost, callbacks) {
       if (!isRunning) {
         break;
       }
-      if (error.message.includes('Invalid Roll Number or Password') || error.message.startsWith('Login failed:')) {
-        throw error; // Do not retry on invalid credentials
+      if (
+        error.message.includes('Invalid Roll Number or Password') ||
+        error.message.startsWith('Login failed:') ||
+        error.message.startsWith('CAPTCHA_REQUIRED:')
+      ) {
+        throw error; // Do not retry on invalid credentials or security/CAPTCHA challenges
       }
       callbacks.onStatusUpdate(`Login failed: ${error.message}. Retrying in ${delayTime}ms...`);
       await delay(delayTime);
@@ -172,31 +198,27 @@ async function automateLoginWithRetry(credentials, targetHost, callbacks) {
 async function fetchCourseRegHTML(cookies, studentHash, targetHost = 'exam-setu.dtu.ac.in') {
   const { default: got } = await import('got');
 
-  try {
-    const response = await got(`https://${targetHost}/student/courseRegistration/${studentHash}`, {
-      method: 'GET',
-      headers: {
-        ...getCommonHeaders(targetHost),
-        'Referer': `https://${targetHost}/student/home/${studentHash}`,
-        'Cookie': cookies,
-      },
-      agent: { https: httpsAgent },
-      responseType: 'text',
-      followRedirect: false,
-      timeout: { request: 6000 },
-    });
+  const response = await got(`https://${targetHost}/student/courseRegistration/${studentHash}`, {
+    method: 'GET',
+    headers: {
+      ...getCommonHeaders(targetHost),
+      'Referer': `https://${targetHost}/student/home/${studentHash}`,
+      'Cookie': cookies,
+    },
+    agent: { https: httpsAgent },
+    responseType: 'text',
+    followRedirect: false,
+    throwHttpErrors: false,
+    timeout: { request: 15000 },
+  });
 
-    if (response.statusCode !== 200) {
-      throw new Error(`Failed to fetch course registration page. Status code: ${response.statusCode}`);
-    }
-
-    console.log('Fetched course registration page successfully.');
-    // console.log(response.body);
-    return response.body;
-  } catch (error) {
-    console.warn("Warning: Unable to fetch course registration HTML content.", error.message);
-    return null;
+  if (response.statusCode !== 200) {
+    const loc = response.headers['location'] ? ` -> ${response.headers['location']}` : '';
+    throw new Error(`HTTP ${response.statusCode}${loc}`);
   }
+
+  console.log('Fetched course registration page successfully.');
+  return response.body;
 }
 
 // Function to Fetch and Track Desired Courses
@@ -602,10 +624,20 @@ async function startAutomation(credentials, targetHost = 'exam-setu.dtu.ac.in', 
   }
 }
 
+async function loginOnlyWithRetry(credentials, targetHost = 'exam-setu.dtu.ac.in', callbacks) {
+  isRunning = true;
+  try {
+    const session = await automateLoginWithRetry(credentials, targetHost, callbacks);
+    return session;
+  } finally {
+    isRunning = false;
+  }
+}
+
 function stopAutomation() {
   if (isRunning) {
     isRunning = false;
   }
 }
 
-module.exports = { startAutomation, stopAutomation };
+module.exports = { startAutomation, stopAutomation, loginOnlyWithRetry };

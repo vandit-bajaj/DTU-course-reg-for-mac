@@ -34,13 +34,14 @@ DTU Course Registrar bypasses the browser rendering pipeline entirely. It direct
 
 ### ✨ Key Features
 
-- ⚡ **Sub-100ms Sniping**: Fires registration POST requests within milliseconds of detecting an open seat.
-- 🌐 **Direct IP Routing**: Connects directly to server IP (`14.139.251.105`) to eliminate DNS lookup latency.
-- 🔁 **ETag-Aware Polling**: Polls every ~900ms and leverages HTTP 304 Not Modified headers to minimize network overhead and server strain.
+- 🪟 **Auto-Login & Open Portal (Manual Mode) — *New in v1.1.0***: Opens an isolated Chromium window directly on `exam-setu.dtu.ac.in/student/login`, retries login automatically until you reach your dashboard, then hands full manual control over to you for course CAPTCHAs and selection.
+- 🔁 **502/504 Host Error Auto-Retry**: Automatically reloads Cloudflare / DTU origin error pages (`502`, `503`, `504`, `520–524`) every 4 seconds without dropping your session.
+- 🛡️ **CAPTCHA & Invalid Credential Guard**: Stops auto-login immediately if a security challenge/CAPTCHA or invalid-credential alert appears, letting you complete it manually.
+- ⚡ **Sub-100ms Seat Polling**: Connects directly to `exam-setu.dtu.ac.in` over persistent Keep-Alive HTTPS connections with MD5/ETag content caching to minimize overhead.
 - 🔄 **Session Recovery**: Automatically re-authenticates if the DTU portal invalidates your session cookie.
-- 🔔 **Native macOS Notifications**: Sends alerts via Apple Notification Center the moment your courses are secured.
+- 🔔 **Native macOS Notifications**: Sends alerts via Apple Notification Center with sound the moment login succeeds or courses are secured.
 - 📝 **Dual Course Input**: Add courses individually through interactive inputs or paste full batches using the built-in JSON editor.
-- 🛡️ **Zero Disk Footprint**: Credentials and session tokens are strictly kept in volatile memory and are never written to disk or transmitted to third parties.
+- 🔒 **Zero Disk Footprint**: Credentials and session tokens are strictly kept in volatile memory and are never written to disk or transmitted to third parties.
 
 <br>
 
@@ -83,6 +84,12 @@ npm start
 
 ## 📋 Usage Guide
 
+### Mode A: Auto-Login & Open Portal (Recommended when CAPTCHA is enabled)
+1. **Enter Credentials**: Fill in your DTU Roll Number and Password (no courses required).
+2. Click **`Auto-Login & Open Portal (Manual Mode)`**.
+3. The app opens `exam-setu.dtu.ac.in/student/login` in a fresh browser window, logs in automatically (retrying `502`/`504` errors every 4s), notifies you with a sound once your dashboard opens, and hands full manual control over to you for clicking **Course Registration** and completing course CAPTCHAs.
+
+### Mode B: Automated Course Seat Monitoring
 1. **Enter Credentials**: Fill in your DTU Roll Number and Password.
 2. **Add Courses to Track**:
    - Click **Add Course** to manually enter Course Code (e.g. `HU317`) and Slot (e.g. `E2`).
@@ -93,8 +100,8 @@ npm start
        { "code": "SE427", "slot": "E1" }
      ]
      ```
-3. **Auto Login**: Toggle **Auto Login on Session Expiry** on to ensure seamless re-authentication if the session drops.
-4. **Start Automation**: Click **Start Automation**. The application will continuously monitor vacancies and register courses automatically.
+3. **Auto Login**: Keep **Auto Login on Session Expiry** enabled for seamless re-authentication if the session drops.
+4. **Start Automation**: Click **Start Automation**.
 
 <br>
 
@@ -128,16 +135,18 @@ xattr -cr /Applications/DTU\ Course\ Registrar.app
 
 ```
 DTU-course-reg-for-mac/
-├── main.js          # Electron main process (window lifecycle & IPC handlers)
-├── preload.js       # Secure context bridge between renderer and Node.js
-├── renderer.js      # UI controller (form handling, JSON modal, event listeners)
-├── automation.js    # Core automation engine (auth, polling, scraping, sniping)
-├── index.html       # Application interface layout
-├── styles.css       # macOS dark-themed UI styling
+├── main.js              # Electron main process (window lifecycle, portal handoff & IPC)
+├── preload.js           # Secure context bridge between renderer and Node.js
+├── renderer.js          # UI controller (form handling, JSON modal, event listeners)
+├── automation.js        # Core automation engine (auth, polling, scraping, diagnostics)
+├── index.html           # Application interface layout
+├── styles.css           # macOS UI styling
+├── scripts/
+│   └── afterPack.js     # Automated macOS Apple Silicon ad-hoc codesigning hook
 ├── assets/
-│   ├── dtulogo.png  # Application icon (PNG format)
-│   └── dtulogo.icns # macOS bundle icon (ICNS format)
-└── package.json     # Project dependencies, scripts, and build configuration
+│   ├── dtulogo.png      # Application icon (PNG format)
+│   └── dtulogo.icns     # macOS bundle icon (ICNS format)
+└── package.json         # Project dependencies, scripts, and build configuration
 ```
 
 <br>
@@ -147,7 +156,7 @@ DTU-course-reg-for-mac/
 | Layer | Technology | Purpose |
 |---|---|---|
 | **Desktop Framework** | [Electron 34](https://www.electronjs.org/) | Cross-platform desktop runtime on Chromium & Node.js |
-| **HTTP Client** | [got v14](https://github.com/sindresorhus/got) | High-performance, lightweight HTTP requests with HTTP/2 & custom agent support |
+| **HTTP Client** | [got v14](https://github.com/sindresorhus/got) | High-performance, lightweight HTTP requests with Keep-Alive & timeout control |
 | **HTML Parser** | [Cheerio](https://cheerio.js.org/) | Fast server-side DOM parsing and selector extraction |
 | **Notifications** | [node-notifier](https://github.com/mikaelbr/node-notifier) | Native Apple Notification Center integration |
 | **Code Editor** | [CodeMirror 5](https://codemirror.net/) | Syntax-highlighted JSON batch editor |
@@ -156,9 +165,9 @@ DTU-course-reg-for-mac/
 
 ## 🔒 Security & Privacy Notes
 
-- **Direct IP Connection**: The client connects directly to `14.139.251.105` to bypass local DNS resolution latency.
+- **Official Portal Domain**: Connects directly to `https://exam-setu.dtu.ac.in` over HTTPS.
 - **In-Memory Only**: Your credentials and authentication cookies remain strictly in memory during the execution lifecycle. No secrets are ever stored in `localStorage`, cache, or on-disk databases.
-- **TLS/SSL Behavior**: SSL verification is configured to accommodate direct IP requests to the university server.
+- **Respects CAPTCHAs**: Never attempts to solve or bypass CAPTCHAs or Cloudflare security verifications — automatically pauses and hands control to you in the visible portal window.
 
 <br>
 

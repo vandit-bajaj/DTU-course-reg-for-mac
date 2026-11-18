@@ -3,6 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const addCourseBtn = document.getElementById('add-course');
   const courseList = document.getElementById('course-list');
+  const loginOpenBtn = document.getElementById('login-open-btn');
   const startBtn = document.getElementById('start-btn');
   const stopBtn = document.getElementById('stop-btn');
   const statusArea = document.getElementById('status-area');
@@ -81,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Function to update UI state
   function setUIState(isAutomationRunning) {
+    loginOpenBtn.classList.toggle('hidden', isAutomationRunning);
     startBtn.classList.toggle('hidden', isAutomationRunning);
     stopBtn.classList.toggle('hidden', !isAutomationRunning);
     addCourseBtn.disabled = isAutomationRunning;
@@ -129,6 +131,33 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   addCourseBtn.addEventListener('click', () => addCourseRow());
+
+  // Auto-Login & Open Portal (Manual Mode) — logs in automatically, then hands off to user
+  loginOpenBtn.addEventListener('click', async () => {
+    clearError();
+    const rollNo = document.getElementById('roll-no').value.trim();
+    const password = document.getElementById('password').value.trim();
+
+    if (!rollNo || !password) {
+      showError('Please enter both Roll Number and Password.');
+      return;
+    }
+
+    isAutomationRunning = true;
+    setUIState(isAutomationRunning);
+    statusArea.textContent = 'Starting auto-login...';
+
+    const response = await window.electronAPI.loginAndOpenPortal({
+      creds: { r: rollNo, p: password },
+    });
+
+    if (!response.success) {
+      showError(response.error);
+      isAutomationRunning = false;
+      setUIState(isAutomationRunning);
+      statusArea.textContent = 'Failed to start login.';
+    }
+  });
 
   // Start the automation process
   startBtn.addEventListener('click', async () => {
@@ -214,6 +243,12 @@ document.addEventListener('DOMContentLoaded', () => {
     isAutomationRunning = false;
     setUIState(isAutomationRunning);
     statusArea.textContent = 'An error occurred.';
+  });
+
+  // Listen for clean completion (e.g., manual handoff after auto-login)
+  window.electronAPI.onDone(() => {
+    isAutomationRunning = false;
+    setUIState(isAutomationRunning);
   });
 
   // JSON Input Modal Logic
