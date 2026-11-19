@@ -258,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showError(errorMessage);
     isAutomationRunning = false;
     setUIState(isAutomationRunning);
-    statusArea.textContent = 'An error occurred.';
+    statusArea.textContent = errorMessage || 'An error occurred.';
   });
 
   // Listen for clean completion (e.g., manual handoff after auto-login)

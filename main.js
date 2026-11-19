@@ -265,12 +265,54 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
 
         if (result.status === 'captcha') {
           playSound('alert');
-          autoLoginActive = false;
-          automationRunning = false;
-          activeManualLoginCancel = null;
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('automation-error', 'Security verification / CAPTCHA detected on login. Please complete it manually in the portal window.');
-          }
+          sendStatus("✋ Security verification required: Please click 'Verify you are human' in the portal window. Credentials will auto-fill right after.");
+          portalWin.focus();
+
+          // Poll every 1.5s until the user completes Turnstile and the login form appears
+          let captchaWaitInterval = setInterval(async () => {
+            if (!autoLoginActive || loggedIn || portalWin.isDestroyed()) {
+              clearInterval(captchaWaitInterval);
+              return;
+            }
+            try {
+              const checkResult = await portalWin.webContents.executeJavaScript(`
+                (() => {
+                  const text = document.body ? document.body.innerText : '';
+                  if (
+                    document.querySelector('.g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*="captcha"], iframe[src*="turnstile"]') ||
+                    /Just a moment|Verify you are human/i.test(document.title + ' ' + text)
+                  ) {
+                    return { status: 'captcha' };
+                  }
+                  const passInput = document.querySelector('input[name="password"], input[type="password"]');
+                  const form = passInput ? passInput.closest('form') : document.querySelector('form[action*="/student/login"]');
+                  const rollInput = form ? form.querySelector('input[name="roll_no"], input[type="text"]') : null;
+                  if (form && rollInput && passInput) {
+                    rollInput.value = ${JSON.stringify(creds.r)};
+                    passInput.value = ${JSON.stringify(creds.p)};
+                    rollInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    passInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    const submitBtn = form.querySelector('button[type="submit"]') || form.querySelector('input[type="submit"]');
+                    if (submitBtn) {
+                      submitBtn.click();
+                    } else {
+                      form.submit();
+                    }
+                    return { status: 'submitted' };
+                  }
+                  return { status: 'waiting' };
+                })();
+              `);
+
+              if (checkResult && checkResult.status === 'submitted') {
+                clearInterval(captchaWaitInterval);
+                attempts++;
+                sendStatus(`Human verification passed! Logging in inside portal window (attempt ${attempts})...`);
+              }
+            } catch (_) {}
+          }, 1500);
+
+          return;
         } else if (result.status === 'alert') {
           playSound('error');
           autoLoginActive = false;
