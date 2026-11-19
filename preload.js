@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopAutomation: () => ipcRenderer.invoke('stop-automation'),
   playSound: (type) => ipcRenderer.invoke('play-sound', type),
   setSoundEnabled: (enabled) => ipcRenderer.invoke('set-sound-enabled', enabled),
+  fillCredentialsManual: () => ipcRenderer.invoke('fill-credentials-manual'),
+  onShowFillCredsBtn: (callback) => ipcRenderer.on('show-fill-creds-btn', callback),
   onStatusUpdate: (callback) => ipcRenderer.on('status-update', callback),
   onCourseRegistered: (callback) => ipcRenderer.on('course-registered', callback),
   onCourseBlocked: (callback) => ipcRenderer.on('course-blocked', callback),

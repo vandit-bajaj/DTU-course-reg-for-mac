@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const loginOpenBtn = document.getElementById('login-open-btn');
   const startBtn = document.getElementById('start-btn');
   const stopBtn = document.getElementById('stop-btn');
+  const fillCredsBtn = document.getElementById('fill-creds-btn');
   const statusArea = document.getElementById('status-area');
   const errorArea = document.getElementById('error-area');
   const registeredList = document.getElementById('registered-list');
@@ -93,6 +94,9 @@ document.addEventListener('DOMContentLoaded', () => {
     loginOpenBtn.classList.toggle('hidden', isAutomationRunning);
     startBtn.classList.toggle('hidden', isAutomationRunning);
     stopBtn.classList.toggle('hidden', !isAutomationRunning);
+    if (!isAutomationRunning && fillCredsBtn) {
+      fillCredsBtn.classList.add('hidden');
+    }
     addCourseBtn.disabled = isAutomationRunning;
     jsonInputBtn.disabled = isAutomationRunning;
 
@@ -231,6 +235,21 @@ document.addEventListener('DOMContentLoaded', () => {
     statusArea.textContent = 'Automation stopped by user.';
     registeredList.innerHTML = '';
     blockedList.innerHTML = '';
+  });
+
+  // Manual trigger to fill credentials once verification is passed
+  if (fillCredsBtn) {
+    fillCredsBtn.addEventListener('click', async () => {
+      statusArea.textContent = 'Auto-filling credentials now...';
+      await window.electronAPI.fillCredentialsManual();
+    });
+  }
+
+  // Listen for show/hide signal for manual auto-fill button
+  window.electronAPI.onShowFillCredsBtn((event, show) => {
+    if (fillCredsBtn) {
+      fillCredsBtn.classList.toggle('hidden', !show);
+    }
   });
 
   // Listen for status updates

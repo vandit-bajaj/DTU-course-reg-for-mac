@@ -1,15 +1,23 @@
 // main.js
 
 const { app, BrowserWindow, ipcMain, session } = require('electron');
+
+// Prevent Chromium automation flags from exposing webdriver to Cloudflare Turnstile
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+
 const path = require('path');
 const { execFile } = require('child_process');
 const notifier = require('node-notifier');
 const { startAutomation, stopAutomation, loginOnlyWithRetry } = require('./automation');
 
+const CHROME_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+app.userAgentFallback = CHROME_USER_AGENT;
+
 let win;
 let automationRunning = false;
 let activeManualLoginCancel = null;
 let soundAlertsEnabled = true;
+let manualFillCredentialsTrigger = null;
 
 function playSound(type) {
   if (!soundAlertsEnabled) return;
@@ -109,6 +117,13 @@ ipcMain.handle('start-automation', async (event, data) => {
   }
 });
 
+ipcMain.handle('fill-credentials-manual', async () => {
+  if (manualFillCredentialsTrigger) {
+    return await manualFillCredentialsTrigger(true);
+  }
+  return { success: false, error: 'Portal window not active' };
+});
+
 ipcMain.handle('login-and-open-portal', async (event, data) => {
   if (automationRunning) {
     return { success: false, error: 'Another task is already running.' };
@@ -123,7 +138,10 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
   automationRunning = true;
   playSound('start');
 
-  const portalSession = session.fromPartition(`portal-${Date.now()}`);
+  // Use persistent partition so Cloudflare clearance cookies (cf_clearance) persist
+  const portalSession = session.fromPartition('persist:dtu_portal');
+  portalSession.setUserAgent(CHROME_USER_AGENT);
+
   const portalWin = new BrowserWindow({
     width: 1200,
     height: 850,
@@ -135,11 +153,14 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
     },
     icon: path.join(__dirname, 'assets', 'dtulogo.png'),
   });
+  portalWin.webContents.setUserAgent(CHROME_USER_AGENT);
 
   let autoLoginActive = true;
   let loggedIn = false;
   let attempts = 0;
   let retryTimer = null;
+  let isFillingCredentials = false;
+  let inVerificationMode = false;
 
   const sendStatus = (msg) => {
     if (win && !win.isDestroyed()) {
@@ -161,13 +182,18 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
 
   activeManualLoginCancel = () => {
     autoLoginActive = false;
+    manualFillCredentialsTrigger = null;
     if (retryTimer) clearTimeout(retryTimer);
   };
 
   portalWin.on('closed', () => {
     if (retryTimer) clearTimeout(retryTimer);
     autoLoginActive = false;
+    manualFillCredentialsTrigger = null;
     activeManualLoginCancel = null;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('show-fill-creds-btn', false);
+    }
     if (!loggedIn) {
       automationRunning = false;
       if (win && !win.isDestroyed()) {
@@ -175,6 +201,112 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
       }
     }
   });
+
+  const attemptFillCredentials = async (isManual = false) => {
+    if (isFillingCredentials || !autoLoginActive || loggedIn || portalWin.isDestroyed()) {
+      return { success: false };
+    }
+    const currentUrl = portalWin.webContents.getURL() || '';
+    const title = portalWin.getTitle() || '';
+
+    // If still on Cloudflare verification page, NEVER touch DOM or inject scripts!
+    if (/Just a moment\.\.\.|Attention Required!|Security Verification/i.test(title)) {
+      if (!inVerificationMode) {
+        inVerificationMode = true;
+        playSound('alert');
+        sendStatus("✋ Security verification required: Please click 'Verify you are human' in the portal window. Credentials will auto-fill right after.");
+        portalWin.focus();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('show-fill-creds-btn', true);
+        }
+      }
+      return { success: false, reason: 'captcha_pending' };
+    }
+
+    if (!currentUrl.includes('/student/login')) {
+      return { success: false, reason: 'not_on_login_page' };
+    }
+
+    isFillingCredentials = true;
+    try {
+      const result = await portalWin.webContents.executeJavaScript(`
+        (() => {
+          const text = document.body ? document.body.innerText : '';
+          if (
+            document.querySelector('.g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*="captcha"], iframe[src*="turnstile"]') ||
+            /Just a moment|Verify you are human/i.test(document.title + ' ' + text)
+          ) {
+            return { status: 'captcha' };
+          }
+          const alertEl = document.querySelector('div.alert.alert-danger');
+          if (alertEl && alertEl.innerText.trim()) {
+            return { status: 'alert', message: alertEl.innerText.replace(/\\s+/g, ' ').replace('×', '').trim() };
+          }
+          const passInput = document.querySelector('input[name="password"], input[type="password"]');
+          const form = passInput ? passInput.closest('form') : document.querySelector('form[action*="/student/login"]');
+          const rollInput = form ? form.querySelector('input[name="roll_no"], input[type="text"]') : null;
+          if (!form || !rollInput || !passInput) {
+            return { status: 'no-form' };
+          }
+          rollInput.value = ${JSON.stringify(creds.r)};
+          passInput.value = ${JSON.stringify(creds.p)};
+          rollInput.dispatchEvent(new Event('input', { bubbles: true }));
+          passInput.dispatchEvent(new Event('input', { bubbles: true }));
+          const submitBtn = form.querySelector('button[type="submit"]') || form.querySelector('input[type="submit"]');
+          if (submitBtn) {
+            submitBtn.click();
+          } else {
+            form.submit();
+          }
+          return { status: 'submitted' };
+        })();
+      `);
+
+      if (result.status === 'captcha') {
+        if (!inVerificationMode) {
+          inVerificationMode = true;
+          playSound('alert');
+          sendStatus("✋ Security verification required: Please click 'Verify you are human' in the portal window. Credentials will auto-fill right after.");
+          portalWin.focus();
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('show-fill-creds-btn', true);
+          }
+        }
+        return { success: false, reason: 'captcha' };
+      } else if (result.status === 'alert') {
+        playSound('error');
+        autoLoginActive = false;
+        automationRunning = false;
+        activeManualLoginCancel = null;
+        manualFillCredentialsTrigger = null;
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('show-fill-creds-btn', false);
+          win.webContents.send('automation-error', `Login failed: ${result.message}`);
+        }
+        return { success: false, reason: 'alert', message: result.message };
+      } else if (result.status === 'submitted') {
+        inVerificationMode = false;
+        attempts++;
+        sendStatus(`Logging in inside portal window (attempt ${attempts})...`);
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('show-fill-creds-btn', false);
+        }
+        return { success: true };
+      } else if (result.status === 'no-form') {
+        if (isManual) {
+          sendStatus('Login form not detected yet. Waiting for page...');
+        }
+        return { success: false, reason: 'no-form' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      isFillingCredentials = false;
+    }
+    return { success: false };
+  };
+
+  manualFillCredentialsTrigger = attemptFillCredentials;
 
   portalWin.webContents.on('did-fail-load', (e, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3 || portalWin.isDestroyed()) return;
@@ -203,6 +335,7 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
         autoLoginActive = false;
         automationRunning = false;
         activeManualLoginCancel = null;
+        manualFillCredentialsTrigger = null;
 
         playSound('login');
 
@@ -216,122 +349,40 @@ ipcMain.handle('login-and-open-portal', async (event, data) => {
 
         sendStatus('Logged in! Continue manually in the portal window (502/504 host errors still auto-retry every 4s).');
         if (win && !win.isDestroyed()) {
+          win.webContents.send('show-fill-creds-btn', false);
           win.webContents.send('automation-done');
         }
       }
       return;
     }
 
-    // On login page: auto-fill credentials directly in the real browser window
+    // On login page: check for challenge or auto-fill credentials
     if (autoLoginActive && !loggedIn && currentUrl.includes('/student/login')) {
-      if (attempts > 0) {
-        sendStatus(`Returned to login page. Checking & retrying in 3s...`);
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        if (!autoLoginActive || loggedIn || portalWin.isDestroyed()) return;
-      }
-      try {
-        const result = await portalWin.webContents.executeJavaScript(`
-          (() => {
-            const text = document.body ? document.body.innerText : '';
-            if (
-              document.querySelector('.g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*="captcha"], iframe[src*="turnstile"]') ||
-              /Just a moment|Verify you are human/i.test(document.title + ' ' + text)
-            ) {
-              return { status: 'captcha' };
-            }
-            const alertEl = document.querySelector('div.alert.alert-danger');
-            if (alertEl && alertEl.innerText.trim()) {
-              return { status: 'alert', message: alertEl.innerText.replace(/\\s+/g, ' ').replace('×', '').trim() };
-            }
-            const passInput = document.querySelector('input[name="password"], input[type="password"]');
-            const form = passInput ? passInput.closest('form') : document.querySelector('form[action*="/student/login"]');
-            const rollInput = form ? form.querySelector('input[name="roll_no"], input[type="text"]') : null;
-            if (!form || !rollInput || !passInput) {
-              return { status: 'no-form' };
-            }
-            rollInput.value = ${JSON.stringify(creds.r)};
-            passInput.value = ${JSON.stringify(creds.p)};
-            rollInput.dispatchEvent(new Event('input', { bubbles: true }));
-            passInput.dispatchEvent(new Event('input', { bubbles: true }));
-            const submitBtn = form.querySelector('button[type="submit"]') || form.querySelector('input[type="submit"]');
-            if (submitBtn) {
-              submitBtn.click();
-            } else {
-              form.submit();
-            }
-            return { status: 'submitted' };
-          })();
-        `);
-
-        if (result.status === 'captcha') {
+      if (/Just a moment\.\.\.|Attention Required!|Security Verification/i.test(title)) {
+        // Cloudflare challenge page detected by title alone — ZERO SCRIPT EXECUTION
+        if (!inVerificationMode) {
+          inVerificationMode = true;
           playSound('alert');
           sendStatus("✋ Security verification required: Please click 'Verify you are human' in the portal window. Credentials will auto-fill right after.");
           portalWin.focus();
-
-          // Poll every 1.5s until the user completes Turnstile and the login form appears
-          let captchaWaitInterval = setInterval(async () => {
-            if (!autoLoginActive || loggedIn || portalWin.isDestroyed()) {
-              clearInterval(captchaWaitInterval);
-              return;
-            }
-            try {
-              const checkResult = await portalWin.webContents.executeJavaScript(`
-                (() => {
-                  const text = document.body ? document.body.innerText : '';
-                  if (
-                    document.querySelector('.g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*="captcha"], iframe[src*="turnstile"]') ||
-                    /Just a moment|Verify you are human/i.test(document.title + ' ' + text)
-                  ) {
-                    return { status: 'captcha' };
-                  }
-                  const passInput = document.querySelector('input[name="password"], input[type="password"]');
-                  const form = passInput ? passInput.closest('form') : document.querySelector('form[action*="/student/login"]');
-                  const rollInput = form ? form.querySelector('input[name="roll_no"], input[type="text"]') : null;
-                  if (form && rollInput && passInput) {
-                    rollInput.value = ${JSON.stringify(creds.r)};
-                    passInput.value = ${JSON.stringify(creds.p)};
-                    rollInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    passInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    const submitBtn = form.querySelector('button[type="submit"]') || form.querySelector('input[type="submit"]');
-                    if (submitBtn) {
-                      submitBtn.click();
-                    } else {
-                      form.submit();
-                    }
-                    return { status: 'submitted' };
-                  }
-                  return { status: 'waiting' };
-                })();
-              `);
-
-              if (checkResult && checkResult.status === 'submitted') {
-                clearInterval(captchaWaitInterval);
-                attempts++;
-                sendStatus(`Human verification passed! Logging in inside portal window (attempt ${attempts})...`);
-              }
-            } catch (_) {}
-          }, 1500);
-
-          return;
-        } else if (result.status === 'alert') {
-          playSound('error');
-          autoLoginActive = false;
-          automationRunning = false;
-          activeManualLoginCancel = null;
           if (win && !win.isDestroyed()) {
-            win.webContents.send('automation-error', `Login failed: ${result.message}`);
+            win.webContents.send('show-fill-creds-btn', true);
           }
-        } else if (result.status === 'submitted') {
-          attempts++;
-          sendStatus(`Logging in inside portal window (attempt ${attempts})...`);
-        } else {
-          sendStatus('Waiting for login form to load... retrying in 4s...');
-          scheduleRetry(true);
         }
-      } catch (err) {
-        sendStatus(`Waiting for login page (${err.message}). Retrying in 4s...`);
-        scheduleRetry(true);
+        return;
       }
+
+      // Real login page loaded: auto-fill credentials
+      await attemptFillCredentials(false);
+    }
+  });
+
+  // When Cloudflare verification succeeds, page title updates from "Just a moment..." back to "ExamSetu"
+  portalWin.on('page-title-updated', async (e, title) => {
+    if (portalWin.isDestroyed() || !autoLoginActive || loggedIn) return;
+    const currentUrl = portalWin.webContents.getURL() || '';
+    if (currentUrl.includes('/student/login') && !/Just a moment\.\.\.|Attention Required!/i.test(title)) {
+      await attemptFillCredentials(false);
     }
   });
 
