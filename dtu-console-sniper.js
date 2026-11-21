@@ -1,48 +1,59 @@
 /**
  * ==============================================================================
- *  DTU ExamSetu — In-Browser Seat Sniper (Console Edition)
+ *  DTU ExamSetu — In-Browser Multi-Target Priority Seat Sniper (Console Edition)
  *  Target: https://exam-setu.dtu.ac.in/register/
  * ==============================================================================
- *  Instructions:
- *  1. Open Chrome and navigate to: https://exam-setu.dtu.ac.in/register/
- *  2. Press Cmd + Option + J (Mac) or Ctrl + Shift + J (Win) to open Console.
- *  3. Paste this entire script and press Enter.
- *  4. Configure your Target Course and Slot in the floating HUD.
- *  5. Click [▶ Start Sniper] and leave the tab open!
+ *  Features:
+ *  - Priority Queue: Add multiple target courses ranked #1, #2, #3, etc.
+ *  - Immediate Sniping: Snipes the highest-priority target with an available seat.
+ *  - Dual Modes: "Direct Add (Empty Slot)" and "Auto-Swap (Drop Backup & Add)".
+ *  - Atomic Swap Safety: Rolls back to backup course if target add fails.
+ *  - Integrated Web Audio API: Piercing alarm on seat found & victory fanfare.
+ *  - Zero Reloads & Cloudflare-Immune: Runs directly inside your authenticated Chrome tab.
  * ==============================================================================
  */
 
 (function DTU_IN_BROWSER_SNIPER() {
   'use strict';
 
-  // 1. Singleton Check: If HUD already exists, remove or re-focus it
+  // 1. Singleton Check: Remove any pre-existing HUD and styles
   const EXISTING_HUD = document.getElementById('dtu-sniper-hud');
-  if (EXISTING_HUD) {
-    EXISTING_HUD.remove();
-  }
+  if (EXISTING_HUD) EXISTING_HUD.remove();
   const EXISTING_STYLE = document.getElementById('dtu-sniper-styles');
-  if (EXISTING_STYLE) {
-    EXISTING_STYLE.remove();
-  }
+  if (EXISTING_STYLE) EXISTING_STYLE.remove();
 
-  // 2. State Management
-  const STORAGE_KEY = 'dtu_sniper_config_v1';
+  // 2. State & Storage Management
+  const STORAGE_KEY = 'dtu_sniper_config_v2';
   let savedConfig = {};
   try {
     savedConfig = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
   } catch (_) {}
 
+  // Ensure default targets array
+  let initialTargets = [
+    { code: '', slot: 'E1' }
+  ];
+  if (Array.isArray(savedConfig.targets) && savedConfig.targets.length > 0) {
+    initialTargets = savedConfig.targets.map(t => ({
+      code: (t.code || '').trim().toUpperCase(),
+      slot: (t.slot || 'E1').trim().toUpperCase(),
+    }));
+  } else if (savedConfig.targetCode) {
+    initialTargets = [{
+      code: (savedConfig.targetCode || '').trim().toUpperCase(),
+      slot: (savedConfig.targetSlot || 'E1').trim().toUpperCase(),
+    }];
+  }
+
   const state = {
     mode: savedConfig.mode || 'direct', // 'direct' | 'swap'
-    targetCode: (savedConfig.targetCode || '').trim().toUpperCase(),
-    targetSlot: (savedConfig.targetSlot || 'E1').trim().toUpperCase(),
+    targets: initialTargets,
     dropCode: (savedConfig.dropCode || '').trim().toUpperCase(),
     dropSlot: (savedConfig.dropSlot || 'E1').trim().toUpperCase(),
     intervalSec: parseFloat(savedConfig.intervalSec) || 1.5,
     isRunning: false,
     timer: null,
     checkCount: 0,
-    logs: [],
   };
 
   const saveState = () => {
@@ -51,8 +62,7 @@
         STORAGE_KEY,
         JSON.stringify({
           mode: state.mode,
-          targetCode: state.targetCode,
-          targetSlot: state.targetSlot,
+          targets: state.targets,
           dropCode: state.dropCode,
           dropSlot: state.dropSlot,
           intervalSec: state.intervalSec,
@@ -61,7 +71,7 @@
     } catch (_) {}
   };
 
-  // 3. Audio Engine (Web Audio API Synthesizer - 0 external files)
+  // 3. Web Audio API Sound Synthesizer (0 external files)
   let audioCtx = null;
   const getAudioContext = () => {
     if (!audioCtx) {
@@ -95,7 +105,6 @@
     beep: () => playTone(880, 0.12, 'square', 0.15),
     click: () => playTone(440, 0.08, 'sine', 0.1),
     foundSeat: () => {
-      // Rapid piercing dual-tone alert
       let t = 0;
       for (let i = 0; i < 6; i++) {
         setTimeout(() => playTone(1200, 0.12, 'square', 0.3), t);
@@ -104,7 +113,6 @@
       }
     },
     victory: () => {
-      // Ascending major fanfare
       const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
       notes.forEach((f, idx) => {
         setTimeout(() => playTone(f, 0.3, 'triangle', 0.4), idx * 160);
@@ -124,7 +132,7 @@
       position: fixed;
       top: 18px;
       right: 18px;
-      width: 360px;
+      width: 380px;
       background: #14171c;
       color: #e5e7eb;
       border: 1px solid #2d333b;
@@ -134,7 +142,6 @@
       font-size: 13px;
       z-index: 9999999;
       user-select: none;
-      transition: box-shadow 0.2s, height 0.2s;
       overflow: hidden;
     }
     #dtu-sniper-hud * { box-sizing: border-box; }
@@ -154,7 +161,6 @@
       align-items: center;
       gap: 7px;
       color: #f6c034;
-      letter-spacing: 0.3px;
     }
     .dtu-sniper-badge {
       background: #373e47;
@@ -189,7 +195,7 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      max-height: 580px;
+      max-height: 600px;
       overflow-y: auto;
     }
     .dtu-sniper-collapsed .dtu-sniper-body {
@@ -229,12 +235,37 @@
       flex-direction: column;
       gap: 8px;
     }
+    .dtu-sniper-box-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
     .dtu-sniper-box-label {
       font-size: 10.5px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: #768390;
+    }
+    .dtu-sniper-priority-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .dtu-sniper-priority-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #22272e;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #2d333b;
+    }
+    .dtu-sniper-priority-tag {
+      font-size: 11px;
+      font-weight: 700;
+      color: #f6c034;
+      min-width: 22px;
     }
     .dtu-sniper-row {
       display: flex;
@@ -251,18 +282,52 @@
       color: #adbac7;
     }
     .dtu-sniper-input, .dtu-sniper-select {
-      background: #22272e;
+      background: #161b22;
       border: 1px solid #373e47;
       color: #f0f6fc;
       border-radius: 6px;
-      padding: 7px 9px;
-      font-size: 12.5px;
+      padding: 6px 8px;
+      font-size: 12px;
       font-family: inherit;
       outline: none;
       transition: border-color 0.15s;
     }
     .dtu-sniper-input:focus, .dtu-sniper-select:focus {
       border-color: #f6c034;
+    }
+    .dtu-sniper-add-target-btn {
+      background: #22272e;
+      border: 1px dashed #373e47;
+      color: #adbac7;
+      border-radius: 6px;
+      padding: 7px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .dtu-sniper-add-target-btn:hover {
+      background: #2d333b;
+      color: #f0f6fc;
+      border-color: #f6c034;
+    }
+    .dtu-sniper-row-delete-btn {
+      background: transparent;
+      border: none;
+      color: #f85149;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+      transition: all 0.15s;
+    }
+    .dtu-sniper-row-delete-btn:hover {
+      background: rgba(248, 81, 73, 0.15);
     }
     .dtu-sniper-status-card {
       background: #1c2128;
@@ -321,7 +386,6 @@
     .dtu-sniper-start:hover {
       background: #e5b028;
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(246, 192, 52, 0.35);
     }
     .dtu-sniper-stop {
       background: #da3633;
@@ -330,7 +394,6 @@
     .dtu-sniper-stop:hover {
       background: #b62324;
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(218, 54, 51, 0.35);
     }
     .dtu-sniper-log-area {
       background: #0d1117;
@@ -339,7 +402,7 @@
       padding: 8px;
       max-height: 120px;
       overflow-y: auto;
-      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
       font-size: 11px;
       color: #8b949e;
       display: flex;
@@ -379,21 +442,18 @@
         <button class="dtu-sniper-mode-btn ${state.mode === 'swap' ? 'active' : ''}" id="mode-swap-btn">Auto-Swap (Drop & Add)</button>
       </div>
 
-      <!-- Target Course Box -->
+      <!-- Target Courses Priority Queue Box -->
       <div class="dtu-sniper-box">
-        <div class="dtu-sniper-box-label">🎯 Target Course (To Snipe)</div>
-        <div class="dtu-sniper-row">
-          <div class="dtu-sniper-field" style="flex: 2;">
-            <label>Course Code</label>
-            <input type="text" class="dtu-sniper-input" id="target-code-input" placeholder="e.g. EP322n, HU328" value="${state.targetCode}" />
-          </div>
-          <div class="dtu-sniper-field" style="flex: 1.2;">
-            <label>Slot</label>
-            <select class="dtu-sniper-select" id="target-slot-select">
-              ${['E1', 'E2', 'E3', 'E4', 'E5'].map(s => `<option value="${s}" ${state.targetSlot === s ? 'selected' : ''}>Slot ${s}</option>`).join('')}
-            </select>
-          </div>
+        <div class="dtu-sniper-box-header">
+          <div class="dtu-sniper-box-label">🎯 Target Courses (Priority Order)</div>
+          <span style="font-size: 10px; color: #f6c034;">Ranked #1, #2...</span>
         </div>
+        <div class="dtu-sniper-priority-list" id="dtu-target-list">
+          <!-- Dynamically Rendered Priority Rows -->
+        </div>
+        <button class="dtu-sniper-add-target-btn" id="dtu-add-target-btn">
+          <span>+ Add Priority Target Course</span>
+        </button>
       </div>
 
       <!-- Swap From Box (Visible only in Swap mode) -->
@@ -424,7 +484,7 @@
 
       <!-- Main Action Button -->
       <button class="dtu-sniper-main-btn dtu-sniper-start" id="dtu-toggle-btn">
-        <span>▶ Start Sniper</span>
+        <span>▶ Start Priority Sniper</span>
       </button>
 
       <!-- Live Status Card -->
@@ -436,15 +496,15 @@
           </span>
           <span id="dtu-check-counter" style="color: #768390; font-size: 11px;">0 checks</span>
         </div>
-        <div id="dtu-target-info" style="font-size: 11.5px; color: #adbac7; line-height: 1.3;">
-          Target: Set course code above
+        <div id="dtu-target-info" style="font-size: 11.5px; color: #adbac7; line-height: 1.4;">
+          Targets: Configure courses above
         </div>
       </div>
 
       <!-- Activity Logs -->
       <div class="dtu-sniper-box-label" style="margin-top: 2px;">📋 Activity Log</div>
       <div class="dtu-sniper-log-area" id="dtu-log-area">
-        <div class="dtu-sniper-log-entry">Sniper initialized. Configure target & press Start.</div>
+        <div class="dtu-sniper-log-entry">Priority Sniper ready. Add target courses in priority order.</div>
       </div>
     </div>
   `;
@@ -459,8 +519,8 @@
   const modeDirectBtn = document.getElementById('mode-direct-btn');
   const modeSwapBtn = document.getElementById('mode-swap-btn');
   const swapBox = document.getElementById('swap-box');
-  const targetCodeInput = document.getElementById('target-code-input');
-  const targetSlotSelect = document.getElementById('target-slot-select');
+  const targetListContainer = document.getElementById('dtu-target-list');
+  const addTargetBtn = document.getElementById('dtu-add-target-btn');
   const dropCodeInput = document.getElementById('drop-code-input');
   const dropSlotSelect = document.getElementById('drop-slot-select');
   const intervalInput = document.getElementById('interval-input');
@@ -471,19 +531,89 @@
   const targetInfo = document.getElementById('dtu-target-info');
   const logArea = document.getElementById('dtu-log-area');
 
-  // 7. Logger Helper
+  // 7. Render Priority Targets Rows
+  const renderTargets = () => {
+    targetListContainer.innerHTML = '';
+    const slots = ['E1', 'E2', 'E3', 'E4', 'E5'];
+
+    state.targets.forEach((target, index) => {
+      const row = document.createElement('div');
+      row.className = 'dtu-sniper-priority-row';
+      row.innerHTML = `
+        <span class="dtu-sniper-priority-tag">#${index + 1}</span>
+        <input type="text" class="dtu-sniper-input target-code-input" placeholder="Course Code" value="${target.code}" style="flex: 2;" data-idx="${index}" />
+        <select class="dtu-sniper-select target-slot-select" style="flex: 1.3;" data-idx="${index}">
+          ${slots.map(s => `<option value="${s}" ${target.slot === s ? 'selected' : ''}>Slot ${s}</option>`).join('')}
+        </select>
+        ${state.targets.length > 1 ? `<button class="dtu-sniper-row-delete-btn" data-idx="${index}" title="Remove Target">✕</button>` : ''}
+      `;
+      targetListContainer.appendChild(row);
+    });
+
+    // Wire up inputs
+    targetListContainer.querySelectorAll('.target-code-input').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.targets[idx].code = e.target.value.trim().toUpperCase();
+        saveState();
+        updateTargetSummary();
+      });
+    });
+
+    targetListContainer.querySelectorAll('.target-slot-select').forEach(select => {
+      select.addEventListener('change', (e) => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.targets[idx].slot = e.target.value;
+        saveState();
+        updateTargetSummary();
+      });
+    });
+
+    targetListContainer.querySelectorAll('.dtu-sniper-row-delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        state.targets.splice(idx, 1);
+        saveState();
+        renderTargets();
+        updateTargetSummary();
+      });
+    });
+
+    updateTargetSummary();
+  };
+
+  const updateTargetSummary = () => {
+    const valid = state.targets.filter(t => t.code);
+    if (valid.length === 0) {
+      targetInfo.innerHTML = `Targets: <span style="color:#768390;">Enter at least 1 target course code</span>`;
+    } else {
+      const list = valid.map((t, idx) => `#${idx + 1} <strong>${t.code}</strong> (${t.slot})`).join(' &gt; ');
+      targetInfo.innerHTML = `Priority: ${list}`;
+    }
+  };
+
+  addTargetBtn.addEventListener('click', () => {
+    state.targets.push({ code: '', slot: 'E1' });
+    saveState();
+    renderTargets();
+  });
+
+  // Initial render
+  renderTargets();
+
+  // 8. Logger Helper
   const addLog = (msg, type = 'info') => {
     const time = new Date().toLocaleTimeString('en-IN', { hour12: false });
     const entry = document.createElement('div');
     entry.className = `dtu-sniper-log-entry ${type}`;
     entry.textContent = `[${time}] ${msg}`;
     logArea.prepend(entry);
-    if (logArea.children.length > 30) {
+    if (logArea.children.length > 35) {
       logArea.lastElementChild.remove();
     }
   };
 
-  // 8. Draggable HUD Implementation
+  // 9. Draggable HUD Implementation
   let isDragging = false;
   let dragOffsetX = 0;
   let dragOffsetY = 0;
@@ -509,7 +639,7 @@
     isDragging = false;
   });
 
-  // 9. UI Controls & Listeners
+  // 10. UI Controls & Listeners
   collapseBtn.addEventListener('click', () => {
     hud.classList.toggle('dtu-sniper-collapsed');
     collapseBtn.textContent = hud.classList.contains('dtu-sniper-collapsed') ? '□' : '─';
@@ -542,16 +672,6 @@
     saveState();
   });
 
-  targetCodeInput.addEventListener('input', (e) => {
-    state.targetCode = e.target.value.trim().toUpperCase();
-    saveState();
-  });
-
-  targetSlotSelect.addEventListener('change', (e) => {
-    state.targetSlot = e.target.value;
-    saveState();
-  });
-
   dropCodeInput.addEventListener('input', (e) => {
     state.dropCode = e.target.value.trim().toUpperCase();
     saveState();
@@ -570,16 +690,14 @@
     saveState();
   });
 
-  // 10. Resilient DOM Traversal & Selector Engine
+  // 11. Resilient DOM Traversal & Selector Engine
   const normalize = (str) => (str || '').replace(/\s+/g, ' ').trim().toUpperCase();
 
-  // Find slot section accordion (e.g. "SLOT E3")
   const findSlotSection = (slotName) => {
     const slotTarget = `SLOT ${slotName.toUpperCase()}`;
     const allHeaders = Array.from(document.querySelectorAll('div, button, section, header'));
     for (const el of allHeaders) {
       if (normalize(el.innerText).includes(slotTarget)) {
-        // Find container wrapping this slot
         const container = el.closest('div[class*="slot"], section, div.border, div.rounded') || el.parentElement;
         return { header: el, container: container || el };
       }
@@ -587,14 +705,11 @@
     return null;
   };
 
-  // Ensure slot accordion is opened
   const ensureSlotOpen = (slotName) => {
     const slotInfo = findSlotSection(slotName);
     if (!slotInfo) return false;
-    // Check if collapsed (chevron pointing down or container child count minimal)
     const text = slotInfo.container.innerText;
     if (!text.includes('credits') && !text.includes('left') && !text.includes('Full')) {
-      // Looks collapsed, click header to open
       const clickable = slotInfo.header.querySelector('button') || slotInfo.header;
       clickable.click();
       return true;
@@ -602,17 +717,13 @@
     return true;
   };
 
-  // Find course row by code inside page
   const findCourseRow = (courseCode) => {
     const targetCode = normalize(courseCode);
     const allDivs = Array.from(document.querySelectorAll('div, li, tr'));
     for (const el of allDivs) {
-      // Look for leaf-like row that contains the exact course code token
       const text = el.innerText || '';
       if (text.includes(courseCode) && (text.includes('credits') || text.includes('left') || text.includes('Full'))) {
-        // Verify this element has children and isn't the whole page
         if (el.children.length >= 2 && el.children.length <= 12) {
-          // Check if it has the exact code token
           const tokens = normalize(text).split(/[\s,]+/);
           if (tokens.includes(targetCode)) {
             return el;
@@ -623,13 +734,10 @@
     return null;
   };
 
-  // Extract seat details from course row element
   const inspectRow = (rowEl) => {
     if (!rowEl) return { status: 'not_found', seats: 0, addBtn: null, dropBtn: null };
 
     const text = rowEl.innerText || '';
-
-    // Seat count matching: "X left" or "Full"
     let seats = 0;
     let isFull = /Full/i.test(text);
     const leftMatch = text.match(/(\d+)\s+left/i);
@@ -638,7 +746,6 @@
       isFull = false;
     }
 
-    // Action button detection
     const buttons = Array.from(rowEl.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
     let addBtn = null;
     let dropBtn = null;
@@ -655,17 +762,9 @@
 
     const isAdded = /Added/i.test(text) || !!dropBtn;
 
-    return {
-      text,
-      seats,
-      isFull,
-      isAdded,
-      addBtn,
-      dropBtn,
-    };
+    return { text, seats, isFull, isAdded, addBtn, dropBtn };
   };
 
-  // Find drop button on left sidebar (e.g. "HU318 ... E3 4 cr ✕")
   const findSidebarDropButton = (courseCode) => {
     const targetCode = normalize(courseCode);
     const sidebar = document.querySelector('div.sidebar, aside') || document.body;
@@ -674,7 +773,6 @@
     for (const el of items) {
       const text = normalize(el.innerText || '');
       if (text.includes(targetCode) && (text.includes('CR') || text.includes('CREDITS'))) {
-        // Look for ✕ button inside
         const btn = el.querySelector('button, span[class*="close"], svg, a');
         if (btn) return btn;
       }
@@ -682,7 +780,7 @@
     return null;
   };
 
-  // 11. Core Sniping Execution Logic
+  // 12. Core Multi-Target Priority Sniping Loop
   let isExecutingAction = false;
 
   const performCheck = async () => {
@@ -691,104 +789,114 @@
     state.checkCount++;
     checkCounter.textContent = `${state.checkCount} checks`;
 
-    // Ensure target slot is visible
-    ensureSlotOpen(state.targetSlot);
+    const activeTargets = state.targets.filter(t => t.code);
+    if (activeTargets.length === 0) return;
 
-    // Locate target course row
-    const targetRow = findCourseRow(state.targetCode);
-    if (!targetRow) {
-      targetInfo.innerHTML = `<span style="color:#f85149;">❌ Row not found for ${state.targetCode}</span><br>Check slot & code spelling.`;
-      addLog(`Row not found for ${state.targetCode} in Slot ${state.targetSlot}`, 'warn');
-      return;
-    }
+    let scanSummary = [];
 
-    const info = inspectRow(targetRow);
+    // Scan targets in priority order (#1 first, then #2, #3...)
+    for (let i = 0; i < activeTargets.length; i++) {
+      const target = activeTargets[i];
+      const priorityLabel = `#${i + 1}`;
 
-    // If target course is already added
-    if (info.isAdded) {
-      targetInfo.innerHTML = `<span style="color:#3fb950; font-weight:700;">🎉 ${state.targetCode} is ALREADY Added!</span>`;
-      addLog(`Success! ${state.targetCode} is registered!`, 'success');
-      sounds.victory();
-      stopSniper();
-      return;
-    }
+      ensureSlotOpen(target.slot);
+      const row = findCourseRow(target.code);
 
-    // Update Live Status Box
-    if (info.isFull || info.seats === 0) {
-      targetInfo.innerHTML = `Target: <strong>${state.targetCode}</strong> (${state.targetSlot})<br><span style="color:#f6c034;">● Status: Full (0 seats)</span>`;
-      if (state.checkCount % 10 === 0) {
-        addLog(`Checked: ${state.targetCode} is still Full. Watching...`);
+      if (!row) {
+        scanSummary.push(`${priorityLabel} ${target.code}: Row not found`);
+        continue;
       }
-      return;
+
+      const info = inspectRow(row);
+
+      // Check if target is already registered
+      if (info.isAdded) {
+        targetInfo.innerHTML = `<span style="color:#3fb950; font-weight:700;">🎉 ${target.code} is ALREADY Registered!</span>`;
+        addLog(`Success! ${target.code} is registered in Slot ${target.slot}!`, 'success');
+        sounds.victory();
+        stopSniper();
+        return;
+      }
+
+      // Check if seats opened on this target
+      if (info.seats > 0 || info.addBtn) {
+        isExecutingAction = true;
+        sounds.foundSeat();
+        addLog(`🔥 PRIORITY ${priorityLabel} HIT! Seat open for ${target.code} (${info.seats} left in Slot ${target.slot})!`, 'success');
+        targetInfo.innerHTML = `<span style="color:#3fb950; font-weight:700;">🔥 HIT! Registering ${priorityLabel} ${target.code}...</span>`;
+
+        await executeSnipeAction(target, info, priorityLabel);
+        return;
+      }
+
+      scanSummary.push(`${priorityLabel} ${target.code}: Full`);
     }
 
-    // SEAT DETECTED!
-    if (info.seats > 0 || info.addBtn) {
-      isExecutingAction = true;
-      sounds.foundSeat();
-      addLog(`🔥 SEAT FOUND for ${state.targetCode}! (${info.seats} left). Firing action...`, 'success');
-      targetInfo.innerHTML = `<span style="color:#3fb950; font-weight:700;">🔥 SEAT OPEN! Registering ${state.targetCode}...</span>`;
+    // If all targets are full, update summary
+    targetInfo.innerHTML = scanSummary.join('<br>');
+    if (state.checkCount % 10 === 0) {
+      addLog(`Cycle ${state.checkCount}: All targets Full. Watching...`);
+    }
+  };
 
-      if (state.mode === 'direct') {
-        // Mode 1: Direct Add
-        if (info.addBtn) {
-          info.addBtn.click();
-          addLog(`Clicked [+ Add] on ${state.targetCode}. Verifying...`, 'info');
-          await handlePostAddVerification(state.targetCode);
-        } else {
-          addLog(`Seat open but [+ Add] button missing. Slot might be occupied! Switch to Auto-Swap?`, 'error');
-          sounds.error();
-          isExecutingAction = false;
-        }
+  // Execute Direct Add or Auto-Swap for the selected winning target
+  const executeSnipeAction = async (target, info, priorityLabel) => {
+    if (state.mode === 'direct') {
+      // Mode 1: Direct Add
+      if (info.addBtn) {
+        info.addBtn.click();
+        addLog(`Clicked [+ Add] on ${target.code}. Verifying...`, 'info');
+        await handlePostAddVerification(target.code);
       } else {
-        // Mode 2: Auto-Swap
-        addLog(`Auto-Swap initiated: Dropping backup [${state.dropCode}] in Slot ${state.dropSlot}...`, 'warn');
+        addLog(`Seat open for ${target.code} but [+ Add] missing. Slot may be occupied. Try Auto-Swap!`, 'error');
+        sounds.error();
+        isExecutingAction = false;
+      }
+    } else {
+      // Mode 2: Auto-Swap
+      addLog(`Auto-Swap triggered for ${priorityLabel} [${target.code}]: Dropping backup [${state.dropCode}] in Slot ${state.dropSlot}...`, 'warn');
 
-        // Step A: Drop backup course
-        let dropSuccess = false;
-        ensureSlotOpen(state.dropSlot);
-        const dropRow = findCourseRow(state.dropCode);
-        const dropInfo = inspectRow(dropRow);
+      let dropSuccess = false;
+      ensureSlotOpen(state.dropSlot);
+      const dropRow = findCourseRow(state.dropCode);
+      const dropInfo = inspectRow(dropRow);
 
-        if (dropInfo.dropBtn) {
-          dropInfo.dropBtn.click();
+      if (dropInfo.dropBtn) {
+        dropInfo.dropBtn.click();
+        dropSuccess = true;
+        addLog(`Clicked [Drop] button on ${state.dropCode} in slot row.`, 'info');
+      } else {
+        const sidebarBtn = findSidebarDropButton(state.dropCode);
+        if (sidebarBtn) {
+          sidebarBtn.click();
           dropSuccess = true;
-          addLog(`Clicked [Drop] button on ${state.dropCode} in slot row.`, 'info');
-        } else {
-          // Fallback to sidebar ✕ button
-          const sidebarBtn = findSidebarDropButton(state.dropCode);
-          if (sidebarBtn) {
-            sidebarBtn.click();
-            dropSuccess = true;
-            addLog(`Clicked [✕] on ${state.dropCode} in sidebar.`, 'info');
-          }
+          addLog(`Clicked [✕] on ${state.dropCode} in sidebar.`, 'info');
         }
+      }
 
-        if (!dropSuccess) {
-          addLog(`Failed to find drop button for ${state.dropCode}. Aborting swap!`, 'error');
-          sounds.error();
-          isExecutingAction = false;
-          return;
-        }
+      if (!dropSuccess) {
+        addLog(`Failed to find drop button for ${state.dropCode}. Aborting swap to keep your course safe!`, 'error');
+        sounds.error();
+        isExecutingAction = false;
+        return;
+      }
 
-        // Wait 350ms for slot to open & DOM to re-render +Add button
-        await new Promise((r) => setTimeout(r, 350));
+      // Wait 350ms for slot to open & DOM to render +Add button
+      await new Promise((r) => setTimeout(r, 350));
 
-        // Step B: Re-query target course row for the newly rendered [+ Add] button
-        ensureSlotOpen(state.targetSlot);
-        const refreshedTargetRow = findCourseRow(state.targetCode);
-        const refreshedInfo = inspectRow(refreshedTargetRow);
+      ensureSlotOpen(target.slot);
+      const refreshedTargetRow = findCourseRow(target.code);
+      const refreshedInfo = inspectRow(refreshedTargetRow);
 
-        if (refreshedInfo.addBtn) {
-          refreshedInfo.addBtn.click();
-          addLog(`Slot vacant! Clicked [+ Add] on target [${state.targetCode}]. Verifying...`, 'success');
-          await handlePostAddVerification(state.targetCode, state.dropCode);
-        } else {
-          // Seat might have been taken during drop gap — Rollback!
-          addLog(`Target [+ Add] not available after drop! Executing EMERGENCY RESTORE on [${state.dropCode}]...`, 'error');
-          sounds.error();
-          await executeRollback(state.dropCode, state.dropSlot);
-        }
+      if (refreshedInfo.addBtn) {
+        refreshedInfo.addBtn.click();
+        addLog(`Slot open! Clicked [+ Add] on target [${target.code}]. Verifying...`, 'success');
+        await handlePostAddVerification(target.code, state.dropCode);
+      } else {
+        // Seat taken in the split-second gap — Emergency Rollback!
+        addLog(`Target [+ Add] unavailable after drop! Executing EMERGENCY RESTORE on [${state.dropCode}]...`, 'error');
+        sounds.error();
+        await executeRollback(state.dropCode, state.dropSlot);
       }
     }
   };
@@ -838,11 +946,11 @@
     isExecutingAction = false;
   };
 
-  // 12. Start / Stop Engine
+  // 13. Start / Stop Engine
   const startSniper = () => {
-    if (!state.targetCode) {
-      alert('Please enter a target Course Code (e.g. EP322n)');
-      targetCodeInput.focus();
+    const validTargets = state.targets.filter(t => t.code);
+    if (validTargets.length === 0) {
+      alert('Please enter at least one target Course Code (e.g. EP322n)');
       return;
     }
     if (state.mode === 'swap' && !state.dropCode) {
@@ -856,17 +964,16 @@
     saveState();
 
     toggleBtn.className = 'dtu-sniper-main-btn dtu-sniper-stop';
-    toggleBtn.innerHTML = '<span>⏹ Stop Sniper</span>';
+    toggleBtn.innerHTML = '<span>⏹ Stop Priority Sniper</span>';
     badgeEl.textContent = 'SNIPING';
     badgeEl.style.background = '#238636';
     badgeEl.style.color = '#fff';
     statusDot.className = 'dtu-sniper-dot active';
-    statusText.textContent = 'Active (Sniping...)';
+    statusText.textContent = `Active (${validTargets.length} targets)`;
 
     sounds.click();
-    addLog(`Sniper started on ${state.targetCode} (${state.targetSlot}) | Mode: ${state.mode}`, 'info');
+    addLog(`Priority Sniper started on ${validTargets.length} targets | Mode: ${state.mode}`, 'info');
 
-    // Run first check immediately, then schedule
     performCheck();
     state.timer = setInterval(performCheck, Math.max(500, state.intervalSec * 1000));
   };
@@ -880,7 +987,7 @@
     isExecutingAction = false;
 
     toggleBtn.className = 'dtu-sniper-main-btn dtu-sniper-start';
-    toggleBtn.innerHTML = '<span>▶ Start Sniper</span>';
+    toggleBtn.innerHTML = '<span>▶ Start Priority Sniper</span>';
     badgeEl.textContent = 'IDLE';
     badgeEl.style.background = '#373e47';
     badgeEl.style.color = '#adbac7';
@@ -898,10 +1005,9 @@
     }
   });
 
-  // Welcome Announcement
   sounds.beep();
   console.log(
-    '%c🎯 DTU ExamSetu Seat Sniper Loaded! %c\nFloating HUD is attached to the top-right corner of your page.',
+    '%c🎯 DTU ExamSetu Priority Seat Sniper Loaded! %c\nFloating HUD is attached to the top-right corner of your page.',
     'background: #f6c034; color: #14171c; font-weight: bold; font-size: 14px; padding: 4px 8px; border-radius: 4px;',
     'color: #adbac7; font-size: 12px;'
   );
