@@ -23,34 +23,36 @@
   if (EXISTING_STYLE) EXISTING_STYLE.remove();
 
   // 2. State & Storage Management
-  const STORAGE_KEY = 'dtu_sniper_config_v2';
+  const STORAGE_KEY = 'dtu_sniper_config_v3';
   let savedConfig = {};
   try {
     savedConfig = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
   } catch (_) {}
 
-  // Ensure default targets array
-  let initialTargets = [
-    { code: '', slot: 'E1' }
+  // Pre-configured Priority Targets
+  const DEFAULT_USER_TARGETS = [
+    { code: 'HU328', slot: 'E2' },
+    { code: 'HU426', slot: 'E4' },
+    { code: 'HU308', slot: 'E4' },
+    { code: 'HU404', slot: 'E4' },
+    { code: 'HU306', slot: 'E1' },
+    { code: 'HU326', slot: 'E1' },
+    { code: 'HU326', slot: 'E5' }
   ];
-  if (Array.isArray(savedConfig.targets) && savedConfig.targets.length > 0) {
-    initialTargets = savedConfig.targets.map(t => ({
-      code: (t.code || '').trim().toUpperCase(),
-      slot: (t.slot || 'E1').trim().toUpperCase(),
-    }));
-  } else if (savedConfig.targetCode) {
-    initialTargets = [{
-      code: (savedConfig.targetCode || '').trim().toUpperCase(),
-      slot: (savedConfig.targetSlot || 'E1').trim().toUpperCase(),
-    }];
-  }
+
+  let initialTargets = (Array.isArray(savedConfig.targets) && savedConfig.targets.length > 0)
+    ? savedConfig.targets.map(t => ({
+        code: (t.code || '').trim().toUpperCase(),
+        slot: (t.slot || 'E1').trim().toUpperCase(),
+      }))
+    : DEFAULT_USER_TARGETS;
 
   const state = {
-    mode: savedConfig.mode || 'direct', // 'direct' | 'swap'
+    mode: savedConfig.mode || 'swap', // 'direct' | 'swap'
     targets: initialTargets,
-    dropCode: (savedConfig.dropCode || '').trim().toUpperCase(),
-    dropSlot: (savedConfig.dropSlot || 'E1').trim().toUpperCase(),
-    intervalSec: parseFloat(savedConfig.intervalSec) || 1.5,
+    dropCode: (savedConfig.dropCode !== undefined && savedConfig.dropCode !== '' ? savedConfig.dropCode : 'IT310').trim().toUpperCase(),
+    dropSlot: (savedConfig.dropSlot || 'E4').trim().toUpperCase(),
+    intervalSec: parseFloat(savedConfig.intervalSec) || 0.9,
     isRunning: false,
     timer: null,
     checkCount: 0,
