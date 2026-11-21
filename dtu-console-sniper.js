@@ -785,7 +785,7 @@
     });
     if (clearBtn) {
       clearBtn.click();
-      addLog('Clicked "Clear filters" so all 155 courses are visible in the DOM.', 'info');
+      addLog('Clicked "Clear filters" so all courses are visible in the DOM.', 'info');
       return true;
     }
     return false;
@@ -818,10 +818,15 @@
   };
 
   // Find course row strictly within page content (NEVER inside HUD or left sidebar)
+  // Fully case-insensitive and supports DTU codes ending in lowercase 'n' (e.g. EE312n, CH314n)
   const findCourseRow = (courseCode) => {
-    const targetCode = normalize(courseCode);
+    if (!courseCode) return null;
+    const cleanCode = (courseCode || '').trim().toUpperCase();
+    const codeRegex = new RegExp(`\\b${cleanCode}\\b`, 'i');
     const hudEl = document.getElementById('dtu-sniper-hud');
+
     const allElements = Array.from(document.querySelectorAll('div, li, tr'));
+    const candidates = [];
 
     for (const el of allElements) {
       // 1. Strictly ignore HUD and its descendants
@@ -831,18 +836,24 @@
       if (el.closest('aside, [class*="sidebar"]')) continue;
 
       const text = el.innerText || '';
-      if (!text.includes(courseCode)) continue;
+      if (!codeRegex.test(text)) continue;
 
-      // Must be a course row containing credits or seats
-      if (text.includes('credits') || text.includes('left') || text.includes('Full')) {
-        // Prevent matching high-level container wrapping multiple courses
-        const codeTokens = (text.match(/\b[A-Z]{2,4}\d{3}[a-z]?\b/g) || []);
-        if (codeTokens.includes(targetCode) && codeTokens.length === 1) {
-          return el;
-        }
+      // Must be a course row containing credits and (seats/status/actions)
+      const hasMeta = /credit|cr/i.test(text) && (/left|Full|Notif|Add|Drop|Added/i.test(text));
+      if (!hasMeta) continue;
+
+      // Prevent matching high-level wrapper containers wrapping multiple distinct courses
+      const distinctCodes = new Set((text.match(/\b[A-Z]{2,4}\d{3}[a-z]?\b/gi) || []).map(c => c.toUpperCase()));
+      if (distinctCodes.size <= 2) {
+        candidates.push(el);
       }
     }
-    return null;
+
+    if (candidates.length === 0) return null;
+
+    // Sort by text length to select the most specific (innermost) row container
+    candidates.sort((a, b) => a.innerText.length - b.innerText.length);
+    return candidates[0];
   };
 
   // Inspect course row for seat count and strictly verified registration status
@@ -858,17 +869,17 @@
       isFull = false;
     }
 
-    const buttons = Array.from(rowEl.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
+    const buttons = Array.from(rowEl.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
     let addBtn = null;
     let dropBtn = null;
 
     buttons.forEach((btn) => {
-      const btnText = normalize(btn.innerText || btn.value);
+      const btnText = (btn.innerText || btn.value || '').replace(/\s+/g, ' ').trim().toUpperCase();
       if (btnText.includes('+ ADD') || btnText === 'ADD' || btnText === '+ADD' || btnText.includes('SELECT')) {
         addBtn = btn;
       }
       // Strict Drop button check: must be strictly 'DROP' or 'REMOVE'
-      if (btnText === 'DROP' || btnText === 'REMOVE') {
+      if (btnText === 'DROP' || btnText.includes('DROP') || btnText === 'REMOVE') {
         dropBtn = btn;
       }
     });
@@ -876,8 +887,8 @@
     // Strict Added verification: Must have a Drop button AND an explicit "Added" badge
     const hasAddedBadge = Array.from(rowEl.querySelectorAll('*')).some(b => {
       if (b.children.length > 0) return false;
-      const t = b.innerText.trim();
-      return t === 'Added' || t === '✓ Added';
+      const t = b.innerText.trim().toLowerCase();
+      return t === 'added' || t === '✓ added';
     });
 
     const isAdded = !!dropBtn && hasAddedBadge;
@@ -886,20 +897,36 @@
   };
 
   const findSidebarDropButton = (courseCode) => {
-    const targetCode = normalize(courseCode);
+    if (!courseCode) return null;
+    const cleanCode = (courseCode || '').trim().toUpperCase();
+    const codeRegex = new RegExp(`\\b${cleanCode}\\b`, 'i');
     const hudEl = document.getElementById('dtu-sniper-hud');
     const sidebar = document.querySelector('div.sidebar, aside, [class*="sidebar"]') || document.body;
-    const items = Array.from(sidebar.querySelectorAll('div, li'));
+    const items = Array.from(sidebar.querySelectorAll('div, li, tr'));
 
     for (const el of items) {
       if (hudEl && hudEl.contains(el)) continue;
-      const text = normalize(el.innerText || '');
-      if (text.includes(targetCode) && (text.includes('CR') || text.includes('CREDITS'))) {
+      const text = el.innerText || '';
+      if (codeRegex.test(text) && (/cr|credit/i.test(text))) {
         const btn = el.querySelector('button, span[class*="close"], svg, a');
         if (btn) return btn;
       }
     }
     return null;
+  };
+
+  const isCourseRegisteredInSidebar = (courseCode) => {
+    if (!courseCode) return false;
+    const cleanCode = (courseCode || '').trim().toUpperCase();
+    const codeRegex = new RegExp(`\\b${cleanCode}\\b`, 'i');
+    const hudEl = document.getElementById('dtu-sniper-hud');
+    const sidebar = document.querySelector('div.sidebar, aside, [class*="sidebar"]') || document.body;
+    const items = Array.from(sidebar.querySelectorAll('div, li, tr'));
+    return items.some(el => {
+      if (hudEl && hudEl.contains(el)) return false;
+      const text = el.innerText || '';
+      return codeRegex.test(text) && (/cr|credit/i.test(text));
+    });
   };
 
   // 12. Core Multi-Target Priority Sniping Loop
@@ -921,12 +948,18 @@
       const target = activeTargets[i];
       const priorityLabel = `#${i + 1}`;
 
-      ensureSlotOpen(target.slot);
+      // 1. Try finding course row directly in rendered DOM first (without toggling open slots)
       let row = findCourseRow(target.code);
 
-      // If row not found, attempt to clear any active filters on the portal
+      // 2. If row not found, attempt to clear any active filters on the portal
       if (!row) {
-        ensureFiltersCleared();
+        if (ensureFiltersCleared()) {
+          row = findCourseRow(target.code);
+        }
+      }
+
+      // 3. If still not found, try ensuring its slot accordion is expanded
+      if (!row) {
         ensureSlotOpen(target.slot);
         row = findCourseRow(target.code);
       }
@@ -938,8 +971,8 @@
 
       const info = inspectRow(row);
 
-      // Check if target is already registered
-      if (info.isAdded) {
+      // Check if target is already registered (in row or in sidebar)
+      if (info.isAdded || isCourseRegisteredInSidebar(target.code)) {
         targetInfo.innerHTML = `<span style="color:#3fb950; font-weight:700;">🎉 ${target.code} is ALREADY Registered!</span>`;
         addLog(`Success! ${target.code} is registered in Slot ${target.slot}!`, 'success');
         sounds.victory();
@@ -1033,11 +1066,11 @@
   // Verify successful addition
   const handlePostAddVerification = async (targetCode, backupCodeToRestore = null) => {
     let verified = false;
-    for (let i = 0; i < 5; i++) {
-      await new Promise((r) => setTimeout(r, 400));
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 350));
       const row = findCourseRow(targetCode);
       const rowInfo = inspectRow(row);
-      if (rowInfo.isAdded) {
+      if (rowInfo.isAdded || isCourseRegisteredInSidebar(targetCode)) {
         verified = true;
         break;
       }
