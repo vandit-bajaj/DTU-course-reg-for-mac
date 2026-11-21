@@ -132,7 +132,8 @@
       position: fixed;
       top: 18px;
       right: 18px;
-      width: 380px;
+      width: 390px;
+      max-height: calc(100vh - 36px);
       background: #14171c;
       color: #e5e7eb;
       border: 1px solid #2d333b;
@@ -143,6 +144,8 @@
       z-index: 9999999;
       user-select: none;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     #dtu-sniper-hud * { box-sizing: border-box; }
     .dtu-sniper-header {
@@ -153,6 +156,7 @@
       background: #1c2128;
       border-bottom: 1px solid #2d333b;
       cursor: move;
+      flex-shrink: 0;
     }
     .dtu-sniper-title {
       font-weight: 700;
@@ -191,12 +195,12 @@
       color: #f0f6fc;
     }
     .dtu-sniper-body {
-      padding: 14px;
+      padding: 12px 14px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      max-height: 600px;
+      gap: 10px;
       overflow-y: auto;
+      flex: 1;
     }
     .dtu-sniper-collapsed .dtu-sniper-body {
       display: none;
@@ -208,6 +212,7 @@
       padding: 3px;
       border-radius: 8px;
       border: 1px solid #2d333b;
+      flex-shrink: 0;
     }
     .dtu-sniper-mode-btn {
       flex: 1;
@@ -234,6 +239,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+      flex-shrink: 0;
     }
     .dtu-sniper-box-header {
       display: flex;
@@ -250,16 +256,31 @@
     .dtu-sniper-priority-list {
       display: flex;
       flex-direction: column;
-      gap: 7px;
+      gap: 6px;
+      max-height: 140px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .dtu-sniper-priority-list::-webkit-scrollbar,
+    .dtu-sniper-log-area::-webkit-scrollbar,
+    .dtu-sniper-body::-webkit-scrollbar {
+      width: 5px;
+    }
+    .dtu-sniper-priority-list::-webkit-scrollbar-thumb,
+    .dtu-sniper-log-area::-webkit-scrollbar-thumb,
+    .dtu-sniper-body::-webkit-scrollbar-thumb {
+      background: #373e47;
+      border-radius: 4px;
     }
     .dtu-sniper-priority-row {
       display: flex;
       align-items: center;
       gap: 6px;
       background: #22272e;
-      padding: 6px 8px;
+      padding: 5px 8px;
       border-radius: 6px;
       border: 1px solid #2d333b;
+      flex-shrink: 0;
     }
     .dtu-sniper-priority-tag {
       font-size: 11px;
@@ -300,8 +321,8 @@
       border: 1px dashed #373e47;
       color: #adbac7;
       border-radius: 6px;
-      padding: 7px;
-      font-size: 11.5px;
+      padding: 6px;
+      font-size: 11px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
@@ -337,6 +358,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      flex-shrink: 0;
     }
     .dtu-sniper-status-line {
       display: flex;
@@ -378,6 +400,7 @@
       justify-content: center;
       gap: 8px;
       transition: all 0.2s;
+      flex-shrink: 0;
     }
     .dtu-sniper-start {
       background: #f6c034;
@@ -395,27 +418,62 @@
       background: #b62324;
       transform: translateY(-1px);
     }
-    .dtu-sniper-log-area {
-      background: #0d1117;
-      border: 1px solid #21262d;
-      border-radius: 6px;
-      padding: 8px;
-      max-height: 120px;
-      overflow-y: auto;
-      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-      font-size: 11px;
-      color: #8b949e;
+    .dtu-sniper-log-wrapper {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .dtu-sniper-log-area {
+      background: #090d13;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 8px 10px;
+      height: 140px;
+      max-height: 140px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11.5px;
+      color: #c9d1d9;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      transition: height 0.2s, max-height 0.2s;
+    }
+    .dtu-sniper-log-area.expanded {
+      height: 260px;
+      max-height: 260px;
     }
     .dtu-sniper-log-entry {
-      line-height: 1.4;
+      line-height: 1.45;
       word-break: break-all;
+      padding: 2px 5px;
+      border-radius: 4px;
+      border-left: 2px solid transparent;
     }
-    .dtu-sniper-log-entry.success { color: #3fb950; font-weight: 600; }
-    .dtu-sniper-log-entry.warn { color: #f6c034; }
-    .dtu-sniper-log-entry.error { color: #f85149; }
+    .dtu-sniper-log-entry:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .dtu-sniper-log-entry.info {
+      color: #c9d1d9;
+      border-left-color: #58a6ff;
+    }
+    .dtu-sniper-log-entry.success {
+      color: #3fb950;
+      font-weight: 600;
+      background: rgba(46, 160, 67, 0.12);
+      border-left-color: #2ea043;
+    }
+    .dtu-sniper-log-entry.warn {
+      color: #f6c034;
+      border-left-color: #d29922;
+    }
+    .dtu-sniper-log-entry.error {
+      color: #f85149;
+      font-weight: 600;
+      background: rgba(248, 81, 73, 0.12);
+      border-left-color: #f85149;
+    }
   `;
   document.head.appendChild(styleEl);
 
@@ -502,9 +560,17 @@
       </div>
 
       <!-- Activity Logs -->
-      <div class="dtu-sniper-box-label" style="margin-top: 2px;">📋 Activity Log</div>
-      <div class="dtu-sniper-log-area" id="dtu-log-area">
-        <div class="dtu-sniper-log-entry">Priority Sniper ready. Add target courses in priority order.</div>
+      <div class="dtu-sniper-log-wrapper">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div class="dtu-sniper-box-label">📋 Activity Log</div>
+          <div style="display: flex; gap: 5px;">
+            <button class="dtu-sniper-icon-btn" id="dtu-expand-log-btn" style="font-size: 11px; padding: 2px 7px; color: #adbac7; background: #22272e; border: 1px solid #373e47; border-radius: 4px;" title="Toggle Large Log View">⤢ Expand</button>
+            <button class="dtu-sniper-icon-btn" id="dtu-clear-log-btn" style="font-size: 11px; padding: 2px 7px; color: #adbac7; background: #22272e; border: 1px solid #373e47; border-radius: 4px;" title="Clear Log Entries">🗑 Clear</button>
+          </div>
+        </div>
+        <div class="dtu-sniper-log-area" id="dtu-log-area">
+          <div class="dtu-sniper-log-entry info">Priority Sniper ready. Add target courses in priority order.</div>
+        </div>
       </div>
     </div>
   `;
@@ -530,6 +596,8 @@
   const checkCounter = document.getElementById('dtu-check-counter');
   const targetInfo = document.getElementById('dtu-target-info');
   const logArea = document.getElementById('dtu-log-area');
+  const expandLogBtn = document.getElementById('dtu-expand-log-btn');
+  const clearLogBtn = document.getElementById('dtu-clear-log-btn');
 
   // 7. Render Priority Targets Rows
   const renderTargets = () => {
@@ -650,6 +718,19 @@
     hud.remove();
     styleEl.remove();
   });
+
+  if (expandLogBtn) {
+    expandLogBtn.addEventListener('click', () => {
+      logArea.classList.toggle('expanded');
+      expandLogBtn.textContent = logArea.classList.contains('expanded') ? '⤡ Compact' : '⤢ Expand';
+    });
+  }
+
+  if (clearLogBtn) {
+    clearLogBtn.addEventListener('click', () => {
+      logArea.innerHTML = '<div class="dtu-sniper-log-entry info">Activity log cleared. Sniper is still running...</div>';
+    });
+  }
 
   soundBtn.addEventListener('click', () => {
     sounds.beep();
